@@ -2,7 +2,7 @@
 option(TARS_MYSQL "option for mysql" ON)
 option(TARS_SSL "option for ssl" OFF)
 option(TARS_HTTP2 "option for http2" OFF)
-option(TARS_PROTOBUF "option for protocol" OFF)
+option(TARS_PROTOBUF "option for protocol" ON)
 option(TARS_GPERF    "option for gperf" OFF)
 
 IF(UNIX)
