@@ -1,6 +1,6 @@
 set(MODULE "pb2tarscpp")
 
-set(EXECUTABLE_OUTPUT_PATH "${PROJECT_BINARY_DIR}/bin")
+#set(EXECUTABLE_OUTPUT_PATH "${PROJECT_BINARY_DIR}/bin")
 
 if(WIN32)
 add_definitions(-DPROTOBUF_USE_DLLS)

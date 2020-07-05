@@ -1,4 +1,4 @@
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
+#set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(TARGETNAME "test-tars-analyzer")
 
 include_directories(${util_SOURCE_DIR}/include)
