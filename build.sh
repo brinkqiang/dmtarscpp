@@ -1,9 +1,13 @@
 #!/bin/bash
 
 # - install depends tools
-# yum -y install git
-# yum -y install gcc gcc-c++ autoconf libtool automake make
+# sudo yum -y install zlib-devel flex bison psmisc libncurses5-dev
 #
+
+# - install depends tools
+# sudo apt-get install zlib1g-dev flex bison psmisc ncurses-devel
+#
+
 
 # pushd thirdparty/depends_path
 # libtoolize && aclocal && autoheader && autoconf && automake --add-missing
