@@ -2,7 +2,7 @@
 option(TARS_MYSQL "option for mysql" ON)
 option(TARS_SSL "option for ssl" OFF)
 option(TARS_HTTP2 "option for http2" OFF)
-option(TARS_PROTOBUF "option for protocol" ON)
+option(TARS_PROTOBUF "option for protocol" OFF)
 option(TARS_GPERF    "option for gperf" OFF)
 
 IF(UNIX)
@@ -47,6 +47,9 @@ set(LIB_SSL)
 set(LIB_CRYPTO)
 set(LIB_PROTOBUF)
 set(LIB_GTEST)
+set(LIB_GPERF)
+set(LIB_TCMALLOC_PROFILER)
+set(LIB_TCMALLOC_MINIMAL)
 #-------------------------------------------------------------
 
 add_custom_target(thirdparty)
@@ -55,21 +58,23 @@ include(ExternalProject)
 
 if (TARS_GPERF)
 
-    set(GPERF_DIR_INC "${THIRDPARTY_PATH}/gpref/include")
-    set(GRPEF_DIR_LIB "${THIRDPARTY_PATH}/gpref/lib")
+    set(GPERF_DIR_INC "${THIRDPARTY_PATH}/gperf/include")
+    set(GRPEF_DIR_LIB "${THIRDPARTY_PATH}/gperf/lib")
     include_directories(${GPERF_DIR_INC})
     link_directories(${GRPEF_DIR_LIB})
 
     if (UNIX)
         set(LIB_GPERF "profiler")
+        set(LIB_TCMALLOC_PROFILER "tcmalloc_and_profiler")
+        set(LIB_TCMALLOC_MINIMAL "tcmalloc_and_minimal")
 
         ExternalProject_Add(ADD_${LIB_GPERF}
                 URL https://tars-thirdpart-1300910346.cos.ap-guangzhou.myqcloud.com//src/gperftools-2.7.tar.gz
                 DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
                 PREFIX ${CMAKE_BINARY_DIR}
                 INSTALL_DIR ${CMAKE_SOURCE_DIR}
-                CONFIGURE_COMMAND ./configure --prefix=${CMAKE_BINARY_DIR}/src/gpref --disable-shared --disable-debugalloc
-                SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gpref-lib
+                CONFIGURE_COMMAND ./configure --prefix=${CMAKE_BINARY_DIR}/src/gperf --disable-shared --disable-debugalloc
+                SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gperf-lib
                 BUILD_IN_SOURCE 1
                 BUILD_COMMAND make
                 # INSTALL_COMMAND ${CMAKE_COMMAND}  --build . --config release --target install
@@ -78,21 +83,21 @@ if (TARS_GPERF)
 
         add_dependencies(thirdparty ADD_${LIB_GPERF})
 
-        INSTALL(FILES ${CMAKE_BINARY_DIR}/src/gpref/bin/pprof
+        INSTALL(FILES ${CMAKE_BINARY_DIR}/src/gperf/bin/pprof
                 PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ
                 DESTINATION thirdparty/bin/)
-        INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/gpref/lib DESTINATION thirdparty)
-        INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/gpref/include/gperftools DESTINATION thirdparty/include)
+        INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/gperf/lib DESTINATION thirdparty)
+        INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/gperf/include/gperftools DESTINATION thirdparty/include)
 
     endif (UNIX)
 
 endif (TARS_GPERF)
 
-set(LIB_GTEST "libgtest")
 
 if(WIN32)
+
     ExternalProject_Add(ADD_CURL
-        URL http://cdn.tarsyun.com/src/curl-7.69.1.tar.gz 
+        URL http://cdn.tarsyun.com/src/curl-7.69.1.tar.gz
         DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
         PREFIX ${CMAKE_BINARY_DIR}
         INSTALL_DIR ${CMAKE_SOURCE_DIR}
@@ -110,20 +115,27 @@ if(WIN32)
 endif(WIN32)
 
 if (WIN32)
+    set(LIB_GTEST "gtest")
+
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(LIB_GTEST "${LIB_GTEST}d")
+    endif()
 
     ExternalProject_Add(ADD_${LIB_GTEST}
             URL http://cdn.tarsyun.com/src/release-1.10.0.zip
             DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
             PREFIX ${CMAKE_BINARY_DIR}
             INSTALL_DIR ${CMAKE_SOURCE_DIR}
-            CONFIGURE_COMMAND ${CMAKE_COMMAND} . -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/src/gtest -Dgtest_force_shared_crt=ON
+            CONFIGURE_COMMAND ${CMAKE_COMMAND} . -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/src/gtest -A x64 -Dgtest_force_shared_crt=on
             SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gtest-lib
             BUILD_IN_SOURCE 1
-            BUILD_COMMAND ${CMAKE_COMMAND} --build . --config release
-            INSTALL_COMMAND ${CMAKE_COMMAND} --build . --config release --target install
+            BUILD_COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE}
+            INSTALL_COMMAND ${CMAKE_COMMAND} --build . --config  ${CMAKE_BUILD_TYPE}  --target install
             URL_MD5 82358affdd7ab94854c8ee73a180fc53
             )
 else()
+    set(LIB_GTEST "gtest")
+
     ExternalProject_Add(ADD_${LIB_GTEST}
             URL http://cdn.tarsyun.com/src/release-1.10.0.tar.gz
             DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
@@ -202,31 +214,31 @@ if (TARS_SSL)
         set(LIB_CRYPTO "libcrypto")
 
         ExternalProject_Add(ADD_${LIB_SSL}
-                URL http://cdn.tarsyun.com/src/openssl-1.1.1d.tar.gz
+                URL http://cdn.tarsyun.com/src/openssl-1.1.1l.tar.gz
                 DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
                 PREFIX ${CMAKE_BINARY_DIR}
                 INSTALL_DIR ${CMAKE_SOURCE_DIR}
-                CONFIGURE_COMMAND perl Configure --prefix=${CMAKE_BINARY_DIR}/src/openssl VC-WIN64A no-asm 
+                CONFIGURE_COMMAND perl Configure --prefix=${CMAKE_BINARY_DIR}/src/openssl --openssldir=ssl VC-WIN64A no-asm
                 SOURCE_DIR ${CMAKE_BINARY_DIR}/src/openssl-lib
                 BUILD_IN_SOURCE 1
                 BUILD_COMMAND nmake
                 INSTALL_COMMAND nmake install
-                URL_MD5 3be209000dbc7e1b95bcdf47980a3baa
+                URL_MD5 ac0d4387f3ba0ad741b0580dd45f6ff3
                 )
     else ()
         set(LIB_SSL "ssl")
         set(LIB_CRYPTO "crypto")
 
         ExternalProject_Add(ADD_${LIB_SSL}
-                URL http://cdn.tarsyun.com/src/openssl-1.1.1d.tar.gz
+                URL http://cdn.tarsyun.com/src/openssl-1.1.1l.tar.gz
                 DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
                 PREFIX ${CMAKE_BINARY_DIR}
                 INSTALL_DIR ${CMAKE_SOURCE_DIR}
-                CONFIGURE_COMMAND ./config --prefix=${CMAKE_BINARY_DIR}/src/openssl no-shared
+                CONFIGURE_COMMAND ./config --prefix=${CMAKE_BINARY_DIR}/src/openssl --openssldir=ssl no-shared
                 SOURCE_DIR ${CMAKE_BINARY_DIR}/src/openssl-lib
                 BUILD_IN_SOURCE 1
                 BUILD_COMMAND make
-                URL_MD5 3be209000dbc7e1b95bcdf47980a3baa
+                URL_MD5 ac0d4387f3ba0ad741b0580dd45f6ff3
                 )
 
     endif ()
@@ -246,7 +258,7 @@ if (TARS_MYSQL)
         set(LIB_MYSQL "libmysql")
 
         ExternalProject_Add(ADD_${LIB_MYSQL}
-                URL http://cdn.tarsyun.com/src/mysql-connector-c-6.1.11-src.zip
+                URL http://cdn.tarsyun.com/src/mysql-connector-c-6.1.11-src.fixed.zip
                 DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
                 PREFIX ${CMAKE_BINARY_DIR}
                 INSTALL_DIR ${CMAKE_SOURCE_DIR}
@@ -255,14 +267,14 @@ if (TARS_MYSQL)
                 BUILD_IN_SOURCE 1
                 BUILD_COMMAND ${CMAKE_COMMAND} --build . --config release
                 INSTALL_COMMAND ${CMAKE_COMMAND} --build . --config release --target install
-                URL_MD5 62de01beffc48348708c983a585b4dc1
+                URL_MD5 bad636fe9bcc9bb62e3f5b784495a9b5
                 )
 
     else ()
         set(LIB_MYSQL "mysqlclient")
 
         ExternalProject_Add(ADD_${LIB_MYSQL}
-                URL http://cdn.tarsyun.com/src/mysql-connector-c-6.1.11-src.tar.gz
+                URL http://cdn.tarsyun.com/src/mysql-connector-c-6.1.11-src.fixed.tar.gz
                 DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
                 PREFIX ${CMAKE_BINARY_DIR}
                 INSTALL_DIR ${CMAKE_SOURCE_DIR}
@@ -270,7 +282,7 @@ if (TARS_MYSQL)
                 SOURCE_DIR ${CMAKE_BINARY_DIR}/src/mysql-lib
                 BUILD_IN_SOURCE 1
                 BUILD_COMMAND make mysqlclient
-                URL_MD5 98ca2071f9d4c6b73146cc0455f6b914
+                URL_MD5 3578d736b9d493eae076a67e3ed473eb
                 )
 
     endif ()

@@ -17,9 +17,11 @@
 #ifndef __TARS_ENDPOINT_INFO_H_
 #define __TARS_ENDPOINT_INFO_H_
 
-#include "servant/Global.h"
+//#include "servant/Global.h"
 #include "util/tc_socket.h"
-#include "AuthF.h"
+#include "util/tc_clientsocket.h"
+#include "servant/EndpointF.h"
+//#include "AuthF.h"
 
 #if TARGET_PLATFORM_WINDOWS
 #include <WS2tcpip.h>
@@ -29,16 +31,12 @@ using namespace std;
 
 namespace tars
 {
-
-//enum AUTH_STATE;
-//////////////////////////////////////////////////////////////////////////////
 /**
  * 地址信息IP:Port
  */
 class EndpointInfo
 {
 public:
-//    enum EType { UDP = TC_ClientSocket::, TCP = 1, SSL = 2};
 
     /**
      * 构造函数
@@ -46,137 +44,125 @@ public:
     EndpointInfo();
 
     /**
+     *
+     * @param ep
+     */
+	EndpointInfo(const TC_Endpoint &ep, const string &setDivision="");
+
+	/**
      * 构造函数
      * @param host
      * @param port
      * @param type
      */
-    EndpointInfo(const string& host, uint16_t port, TC_Endpoint::EType type, int32_t grid, const string & setDivision, int qos, int weight = -1, unsigned int weighttype = 0, int authType = 0);
+	EndpointInfo(const EndpointF &ep);
 
     /**
      * get endpoint
      * @return
      */
-	const TC_Endpoint &getEndpoint() const { return _ep; }
-//    /**
-//     * 地址的字符串描述,不带set信息
-//     *
-//     * @return string
-//     */
-//     const string& descNoSetInfo() const;
+	inline const TC_Endpoint &getEndpoint() const { return _ep; }
 
-    /**
+	/**
+	 *
+	 * @return
+	 */
+	inline TC_Endpoint &getEndpoint() { return _ep; }
+
+
+	/**
+     * 地址的字符串描述(用于比较)
+     *
+     * @return string
+     */
+	inline const string & cmpDesc() const { return _cmpDesc; }
+
+	/**
      * 地址的字符串描述
      *
      * @return string
      */
-    const string & desc() const
-    {
-        return _desc;
-    }
-
-//    /**
-//     * 比较的地址的字符串描述
-//     *
-//     * @return string
-//     */
-//    const string & compareDesc() const
-//    {
-//        return _cmpDesc;
-//    }
+    inline const string & desc() const { return _desc; }
 
     /**
-     * 详细地址字符串描述
-     * 
-     * @return string 
+     *
+     * @return
      */
-	bool isTcp() const;
+	inline bool isTcp() const { return _ep.isTcp(); }
 
     /**
+     *
+     * @return
+     */
+	inline bool isSsl() const { return _ep.isSSL(); }
+
+    /**
+     * 
+     *
+     */  
+	inline bool isUdp() const { return _ep.isUdp(); }
+
+	/**
      * 获取主机名
      *
      * @return const string&
      */
-    const string &host() const;
+    const string &host() const { return _ep.getHost(); }
 
     /**
      * 获取端口号
      *
      * @return uint16_t
      */
-    uint16_t port() const;
+    uint16_t port() const { return _ep.getPort(); }
 
     /**
-     * 获取路由状态
+     * 获取路由状态(不再使用)
      * @return int32_t
      */
-    int32_t grid() const;
+    inline int32_t grid() const { return _ep.getGrid(); }
 
     /*
      * 获取qos的descp值
      */
-    int32_t qos() const {return _ep.getQos();}
+    inline int32_t qos() const {return _ep.getQos();}
 
     /*
      * 获取节点的静态权重值
      */
-    int weight() const {return _ep.getWeight();}
+    inline int weight() const {return _ep.getWeight();}
 
     /**
      * @brief 获取节点的权重使用方式
      */
-    unsigned int getWeightType() const { return _ep.getWeightType(); }
+    inline unsigned int getWeightType() const { return _ep.getWeightType(); }
 
-    /**
-     * 解析域名 
-     */
-    void parseAddress();
-
-    /**
-     * 获取主机地址
-     *
-     * @return const struct sockaddr_in&
-     */
-    const struct sockaddr_in& addr() const;
-
-    /**
-     * Get ipv4 or ipv6 struct sockaddr
-     *
-     * @return const struct sockaddr *
-     */
-    const struct sockaddr * addrPtr() const;
 
     /**
      * 返回端口类型
      *
      * @return EndpointInfo::EType
      */
-    TC_Endpoint::EType type() const { return _ep.getType(); }
+    inline TC_Endpoint::EType type() const { return _ep.getType(); }
 
-    /**
-    *设置set分组信息
-    *
-    *@return void
-    */
-    void setDivision(const string& sSetDivision);
 
     /**
     *返回set分组信息
     *
     *@return string
     */
-    const string& setDivision() const;
+    inline const string& setDivision() const { return _setDivision; }
 
     /*
      * 获取认证类型
      */
-    int authType() const  { return _ep.getAuthType(); }
+    inline TC_Endpoint::AUTH_TYPE authType() const  { return _ep.getAuthType(); }
 
     /**
      * @brief is ipv6 socket or not
      * @return true if is ipv6
      */
-    bool isIPv6() const  { return _ep.isIPv6(); }
+    inline bool isIPv6() const  { return _ep.isIPv6(); }
 
     /**
      * 等于
@@ -184,15 +170,7 @@ public:
      *
      * @return bool
      */
-    bool operator == (const EndpointInfo& r) const;
-
-//    /**
-//    *等于,set信息不参与比较
-//    *@param r
-//    *
-//    *@return bool
-//    */
-//    bool equalNoSetInfo(const EndpointInfo& r) const;
+    inline bool operator == (const EndpointInfo& r) const { return (_cmpDesc == r._cmpDesc); }
 
     /**
      * 小于
@@ -200,7 +178,7 @@ public:
      *
      * @return bool
      */
-    bool operator < (const EndpointInfo& r) const;
+    inline bool operator < (const EndpointInfo& r) const { return (_cmpDesc < r._cmpDesc); }
 
 protected:
 
@@ -209,7 +187,7 @@ protected:
      * @param bWithSetInfo,标识
      * @return string
      */
-    string createDesc() const;
+    string createDesc() const { return _ep.toString(); }
 
     /**
      * 详细地址字符串描述
@@ -219,22 +197,17 @@ protected:
     string createCompareDesc();
 
 private:
+	/**
+	 * 服务地址
+	 */
     TC_Endpoint _ep;
 
-   /**
-    *set分组信息
-    */
+
+	/**
+	 *set分组信息
+	 */
     string                 _setDivision;
 
-
-    /**
-     * 地址
-     */
-    union
-    {
-        struct sockaddr_in     in;
-        struct sockaddr_in6    in6;
-    } _addr;
 
     /**
      * 比较的地址字符串描述
@@ -247,10 +220,6 @@ private:
     string                 _desc;
 
 
-    /**
-     * 解析域名成功
-     */ 
-    bool                   _addressSucc;
 };
 /////////////////////////////////////////////////////////////////////////////
 }

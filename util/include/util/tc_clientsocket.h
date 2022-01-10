@@ -63,7 +63,12 @@ struct TC_EndpointParse_Exception : public TC_Exception
 class TC_Endpoint
 {
 public:
+    //监听类型
 	enum EType { UDP = 0, TCP = 1, SSL = 2 };
+
+    //鉴权类型
+    enum AUTH_TYPE { AUTH_TYPENONE = 0, AUTH_TYPELOCAL = 1};
+
     /**
      *
      */
@@ -79,7 +84,7 @@ public:
      * @param type, SOCK_STREAM或SOCK_DGRAM
      * @param type, SOCK_STREAM or SOCK_DGRAM
      */
-    TC_Endpoint(const string& host, int port, int timeout, EType type = TCP, int grid = 0, int qos = 0, int weight = -1, unsigned int weighttype = 0, int authType = 0)
+    TC_Endpoint(const string& host, int port, int timeout, EType type = TCP, int grid = 0, int qos = 0, int weight = -1, unsigned int weighttype = 0, AUTH_TYPE authType = AUTH_TYPENONE)
     {
         init(host, port, timeout, type, grid, qos, weight, weighttype, authType);
     }
@@ -198,12 +203,12 @@ public:
     int getTimeout() const              { return _timeout; }
 
     /**
-     * @brief  是否是TCP, 否则则为UDP
+     * @brief  是否是TCP/SSL, 否则则为UDP
      * @brief  Determine whether it uses TCP or UDP
      *
      * @return bool
      */
-    int  isTcp() const                  { return _type == TCP || _type == SSL; }
+    bool isTcp() const                  { return _type == TCP || _type == SSL; }
 
     /**
      * @brief  是否是SSL
@@ -211,15 +216,14 @@ public:
      *
      * @return int
      */
-    int isSSL() const                  { return _type == SSL; }
+    bool isSSL() const                  { return _type == SSL; }
 
     /**
      * @brief 设置为TCP或UDP
      * @brief Set to TCP or UDP
      * @param bTcp
      */
-	int isUdp() const                  { return _type == UDP; }
-//    void setTcp(bool bTcp)              { _type = bTcp; }
+	bool isUdp() const                  { return _type == UDP; }
 
     /**
      * @brief 设置为TCP/UDP/SSL
@@ -227,6 +231,7 @@ public:
      * @param type
      */
     void setType(EType type)             { _type = type; }
+    
     /**
      * @brief 获取协议类型
      * @brief Get the protocol type
@@ -306,13 +311,13 @@ public:
      * @brief 获取认证类型
      * @brief Get authentication type
      */
-    int getAuthType() const             { return _authType; }
+    AUTH_TYPE getAuthType() const             { return _authType; }
 
 	/**
      * @brief 设置认证类型
      * @brief Set authentication type
      */
-    void setAuthType(int type)          { _authType = type; }
+    void setAuthType(AUTH_TYPE type)          { _authType = type; }
 
     /**
      * @brief 字符串描述
@@ -330,10 +335,11 @@ public:
         else 
             os << "ssl";
 
-        os << " -h " << _host << " -p " << _port << " -t " << _timeout;
+        os << " -h " << _host << " -p " << _port;
+        if(_timeout != 0) os << " -t " << _timeout;
         if (_grid != 0) os << " -g " << _grid;
         if (_qos != 0) os << " -q " << _qos;
-        if (_weight != -1) os << " -w " << _weight;
+        if (_weight > 0 ) os << " -w " << _weight;
         if (_weighttype != 0) os << " -v " << _weighttype;
 		if (_authType != 0) os << " -e " << _authType;
         return os.str();
@@ -364,7 +370,7 @@ public:
     void parse(const string &desc);
 
 private:
-    void init(const string& host, int port, int timeout, EType type, int grid, int qos, int weight, unsigned int weighttype, int authType);
+    void init(const string& host, int port, int timeout, EType type, int grid, int qos, int weight, unsigned int weighttype, AUTH_TYPE authType);
 
 protected:
     /**
@@ -376,13 +382,13 @@ protected:
      * 端口
      * Port
      */
-    int         _port;
+    int         _port = 0;
 
     /**
      * 超时时间
      * Timeout
      */
-    int         _timeout;
+    int         _timeout = 3000;
 
     /**
      * 类型
@@ -394,30 +400,31 @@ protected:
      * 路由状态
      * Route Status
      */
-    int         _grid;
+    int         _grid = 0;
 
     /**
      *  网络QoS的dscp值
      *  DSCP value of network QoS
      */
-    int         _qos;
+    int         _qos = 0;
 
     /**
      *  节点的静态权重值
      *  the static weight value of node
      */
-    int            _weight;
+    int        _weight = -1;
 
     /**
      *  节点的权重使用方式
      *  the weight usage of nodes
      */
-    unsigned int    _weighttype;
+    unsigned int  _weighttype = 0;
+
     /**
      *  鉴权类型
      *  Authentication Type
      */
-    int         _authType;
+    AUTH_TYPE      _authType = AUTH_TYPENONE;
 
     /**
      * _host is ipv6 or not

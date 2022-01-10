@@ -23,17 +23,18 @@
 #include "servant/BaseF.h"
 #include "servant/KeepAliveNodeF.h"
 #include "servant/Cookie.h"
-#ifdef TARS_OPENTRACKING
-#include "servant/text_map_carrier.h"
-#endif
+#include "servant/Application.h"
+// #ifdef TARS_OPENTRACKING
+// #include "servant/text_map_carrier.h"
+// #endif
 
 namespace tars
 {
 
 /////////////////////////////////////////////////////////////////////////
 //
-ServantHandle::ServantHandle()
-: _coroSched(NULL)
+ServantHandle::ServantHandle(Application *application)
+: _application(application)
 {
     
 }
@@ -59,194 +60,7 @@ ServantHandle::~ServantHandle()
         ++it;
     }
 
-    if(_coroSched != NULL)
-    {
-        delete _coroSched;
-        _coroSched = NULL;
-    }
-}
 
-void ServantHandle::run()
-{
-	try
-	{
-		initialize();
-
-	    if (!ServerConfig::OpenCoroutine)
-	    {
-	        handleImp();
-	    }
-	    else
-	    {        
-	        //by goodenpei, 判断是否启用顺序模式
-	        _bindAdapter->initThreadRecvQueue(getHandleIndex());
-        
-	        size_t iThreadNum = getEpollServer()->getLogicThreadNum();
-
-	        size_t iCoroutineNum = (ServerConfig::CoroutineMemSize > ServerConfig::CoroutineStackSize) ? (ServerConfig::CoroutineMemSize / (ServerConfig::CoroutineStackSize * iThreadNum)) : 1;
-	        if (iCoroutineNum < 1) iCoroutineNum = 1;
-
-			startHandle();
-
-			_coroSched = new CoroutineScheduler();
-			_coroSched->init(iCoroutineNum, ServerConfig::CoroutineStackSize);
-			_coroSched->setHandle(this);
-
-			_coroSched->createCoroutine(std::bind(&ServantHandle::handleRequest, this));
-
-			ServantProxyThreadData *pSptd = ServantProxyThreadData::getData();
-
-			assert(pSptd != NULL);
-
-			pSptd->_sched = _coroSched;
-
-			while (!getEpollServer()->isTerminate()) 
-			{
-				_coroSched->tars_run();
-			}
-
-			_coroSched->terminate();
-
-			_coroSched->destroy();
-
-			stopHandle();
-		}
-	}
-	catch(exception &ex)
-	{
-		TLOGERROR("[ServantHandle::run exception error:" << ex.what() << "]" << endl);
-		cerr << "ServantHandle::run exception error:" << ex.what() << endl;
-	}
-	catch(...)
-	{
-		TLOGERROR("[ServantHandle::run unknown exception error]" << endl);
-		cerr << "ServantHandle::run unknown exception error]" << endl;
-	}
-}
-
-
-void ServantHandle::handleRequest()
-{
-    bool bYield = false;
-    while (!getEpollServer()->isTerminate())
-    {
-    	wait();
-
-        //上报心跳
-        heartbeat();
-
-        //为了实现所有主逻辑的单线程化,在每次循环中给业务处理自有消息的机会
-        handleAsyncResponse();
-        handleCustomMessage(true);
-
-        bYield = false;
-
-	    shared_ptr<TC_EpollServer::RecvContext> data;
-        try
-        {
-            bool bFlag = true;
-            int	iLoop = 100;
-            while (bFlag && iLoop > 0)
-            {
-                --iLoop;
-                if ((_coroSched->getFreeSize() > 0) && popRecvQueue(data))
-                {
-                    bYield = true;
-
-                    //上报心跳
-                    heartbeat();
-
-                    //为了实现所有主逻辑的单线程化,在每次循环中给业务处理自有消息的机会
-                    handleAsyncResponse();
-
-                    //数据已超载 overload
-                    if (data->isOverload())
-                    {
-                        handleOverload(data);
-                    }
-                    //关闭连接的通知消息
-                    else if (data->isClosed())
-                    {
-                        handleClose(data);
-                    }
-                    //数据在队列中已经超时了
-                    else if ((TNOWMS - data->recvTimeStamp()) > (int64_t)_bindAdapter->getQueueTimeout())
-                    {
-                        handleTimeout(data);
-                    }
-                    else
-                    {
-                        uint32_t iRet = _coroSched->createCoroutine(std::bind(&ServantHandle::handleRecvData, this, data));
-                        if (iRet == 0)
-                        {
-                            handleOverload(data);
-                        }
-                    }
-                    handleCustomMessage(false);
-                }
-                else
-                {
-                    //_coroSched->yield();
-                    bFlag = false;
-                    bYield = false;
-                }
-            }
-
-            if (iLoop == 0) bYield = false;
-        }
-        catch (exception& ex)
-        {
-            if (data)
-            {
-                close(data);
-            }
-
-            getEpollServer()->error("[Handle::handleImp] error:" + string(ex.what()));
-        }
-        catch (...)
-        {
-            if (data)
-            {
-                close(data);
-            }
-
-            getEpollServer()->error("[Handle::handleImp] unknown error");
-        }
-        if (!bYield)
-        {
-            _coroSched->yield();
-        }
-    }
-}
-
-void ServantHandle::handleRecvData(const shared_ptr<TC_EpollServer::RecvContext> &data)
-{
-    try
-    {
-        TarsCurrentPtr current = createCurrent(data);
-
-        if (!current) 
-        {
-            return;
-        }
-
-        if (current->getBindAdapter()->isTarsProtocol())
-        {
-            handleTarsProtocol(current);
-        }
-        else
-        {
-            handleNoTarsProtocol(current);
-        }
-    }
-    catch(exception &ex)
-    {
-        TLOGERROR("[ServantHandle::handleRecvData exception:" << ex.what() << "]" << endl);
-    }
-    catch(...)
-    {
-        TLOGERROR("[ServantHandle::handleRecvData unknown exception error]" << endl);
-    }
 }
 
 void ServantHandle::handleAsyncResponse()
@@ -326,22 +140,27 @@ void ServantHandle::handleCustomMessage(bool bExpectIdle)
 
 bool ServantHandle::allFilterIsEmpty()
 {
-    auto it = _servants.begin();
+	auto it = _servants.begin();
 
-    while (it != _servants.end())
-    {
-        if (!it->second->getResponseQueue().empty())
-        {
-            return false;
-        }
-        ++it;
-    }
-    return true;
+	while (it != _servants.end())
+	{
+		if (!it->second->getResponseQueue().empty())
+		{
+			return false;
+		}
+		++it;
+	}
+	return true;
 }
 
 void ServantHandle::initialize()
 {
-    ServantPtr servant = ServantHelperManager::getInstance()->create(_bindAdapter->getName());
+	if(TC_CoroutineScheduler::scheduler())
+	{
+		ServantProxyThreadData::getData()->_sched = TC_CoroutineScheduler::scheduler();
+	}
+
+    ServantPtr servant = _application->getServantHelper()->create(_bindAdapter->getName());
 
     if (servant)
     {
@@ -400,39 +219,39 @@ void ServantHandle::initialize()
 
 	        TC_Common::msleep(100);
 
-	        exit(-1);
-        }
-        ++it;
-    }
+			exit(-1);
+		}
+		++it;
+	}
 }
 
 void ServantHandle::heartbeat()
 {
-    time_t fcur = TNOW;
+	time_t fcur = TNOW;
 
-    if (abs(fcur - _bindAdapter->getHeartBeatTime()) > HEART_BEAT_INTERVAL)
-    {
-        _bindAdapter->setHeartBeatTime(fcur);
+	if (abs(fcur - _bindAdapter->getHeartBeatTime()) > HEART_BEAT_INTERVAL)
+	{
+		_bindAdapter->setHeartBeatTime(fcur);
 
         TARS_KEEPALIVE(_bindAdapter->getName());
 
-	    //上报连接数 比率
-        if (_bindAdapter->_pReportConRate)
-        {
-            _bindAdapter->_pReportConRate->report((int)(_bindAdapter->getNowConnection() * 1000 / _bindAdapter->getMaxConns()));
-        }
+		//上报连接数 比率
+		if (_bindAdapter->_pReportConRate)
+		{
+			_bindAdapter->_pReportConRate->report((int)(_bindAdapter->getNowConnection() * 1000 / _bindAdapter->getMaxConns()));
+		}
 
-        //有队列, 且队列长度>0才上报
-        if (_bindAdapter->_pReportQueue)
-        {
-            _bindAdapter->_pReportQueue->report((int)_bindAdapter->getRecvBufferSize());
-        }
-    }
+		//有队列, 且队列长度>0才上报
+		if (_bindAdapter->_pReportQueue)
+		{
+			_bindAdapter->_pReportQueue->report((int)_bindAdapter->getRecvBufferSize());
+		}
+	}
 }
 
-TarsCurrentPtr ServantHandle::createCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data)
+CurrentPtr ServantHandle::createCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data)
 {
-    TarsCurrentPtr current = new Current(this);
+	CurrentPtr current = new Current(this);
 
     try
     {
@@ -450,14 +269,14 @@ TarsCurrentPtr ServantHandle::createCurrent(const shared_ptr<TC_EpollServer::Rec
     {
         int64_t now = TNOWMS;
 
-        //数据在队列中的时间超过了客户端等待的时间(TARS协议)
-        if (current->_request.iTimeout > 0 && (now - data->recvTimeStamp()) > current->_request.iTimeout)
-        {
-            //上报超时数目
-            if(data->adapter()->_pReportTimeoutNum)
-                data->adapter()->_pReportTimeoutNum->report(1);
+		//数据在队列中的时间超过了客户端等待的时间(TARS协议)
+		if (current->_request.iTimeout > 0 && (now - data->recvTimeStamp()) > current->_request.iTimeout)
+		{
+			//上报超时数目
+			if (data->adapter()->_pReportTimeoutNum) 
+				data->adapter()->_pReportTimeoutNum->report(1);
 
-            TLOGERROR("[ServantHandle::handle queue timeout:"
+            TLOGERROR("[TARS][ServantHandle::handle queue timeout:"
                          << current->_request.sServantName << ", func:"
                          << current->_request.sFuncName << ", recv time:"
                          << data->recvTimeStamp()  << ", queue timeout:"
@@ -467,64 +286,62 @@ TarsCurrentPtr ServantHandle::createCurrent(const shared_ptr<TC_EpollServer::Rec
 
             current->sendResponse(TARSSERVERQUEUETIMEOUT);
 
-            return NULL;
-        }
-    }
+			return NULL;
+		}
+	}
 
-    return current;
+	return current;
 }
 
-TarsCurrentPtr ServantHandle::createCloseCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data)
+CurrentPtr ServantHandle::createCloseCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data)
 {
-    TarsCurrentPtr current = new Current(this);
+	CurrentPtr current = new Current(this);
 
-    current->initializeClose(data);
-    current->setReportStat(false);
-    current->setCloseType(data->closeType());
-    return current;
+	current->initializeClose(data);
+	current->setReportStat(false);
+	current->setCloseType(data->closeType());
+	return current;
 }
 
 void ServantHandle::handleClose(const shared_ptr<TC_EpollServer::RecvContext> &data)
 {
     TLOGTARS("[ServantHandle::handleClose,adapter:" << data->adapter()->getName() << ",peer:" << data->ip() << ":" << data->port() << "]"<< endl);
 
-    TarsCurrentPtr current = createCloseCurrent(data);
+	CurrentPtr current = createCloseCurrent(data);
 
-    auto sit = _servants.find(current->getServantName());
+	auto sit = _servants.find(current->getServantName());
 
-    if (sit == _servants.end())
-    {
-        TLOGERROR("[ServantHandle::handleClose,adapter:" << data->adapter()->getName()
-                << ",peer:" << data->ip() << ":" << data->port()<<", " << current->getServantName() << " not found]" << endl);
+	if (sit == _servants.end())
+	{
+		TLOGERROR("[TARS]ServantHandle::handleClose,adapter:" << data->adapter()->getName() << ",peer:" << data->ip() << ":" << data->port() << ", " << current->getServantName() << " not found" << endl);
 
-        return;
-    }
+		return;
+	}
 
+	try
+	{
+		//业务逻辑处理
+		sit->second->doClose(current);
+	}
+	catch (exception& ex)
+	{
+		TLOGERROR("[TARS]ServantHandle::handleClose " << ex.what() << endl);
 
-    try
-    {
-        //业务逻辑处理
-        sit->second->doClose(current);
-    }
-    catch(exception &ex)
-    {
-        TLOGERROR("[ServantHandle::handleClose " << ex.what() << "]" << endl);
+		return;
+	}
+	catch (...)
+	{
+		TLOGERROR("[TARS]ServantHandle::handleClose unknown error" << endl);
 
-        return;
-    }
-    catch(...)
-    {
-        TLOGERROR("[ServantHandle::handleClose unknown error]" << endl);
-
-        return;
-    }
+		return;
+	}
 }
 
 void ServantHandle::handleTimeout(const shared_ptr<TC_EpollServer::RecvContext> &data)
 {
-    TarsCurrentPtr current = createCurrent(data);
+	CurrentPtr current = createCurrent(data);
 
-    if (!current) return;
+	if (!current) return;
 
     //上报超时数目
     if(data->adapter()->_pReportTimeoutNum)
@@ -544,9 +361,9 @@ void ServantHandle::handleTimeout(const shared_ptr<TC_EpollServer::RecvContext> 
 
 void ServantHandle::handleOverload(const shared_ptr<TC_EpollServer::RecvContext> &data)
 {
-    TarsCurrentPtr current = createCurrent(data);
+	CurrentPtr current = createCurrent(data);
 
-    if (!current) return;
+	if (!current) return;
 
     TLOGERROR("[ServantHandle::handleOverload adapter '"
                  << data->adapter()->getName()
@@ -562,9 +379,9 @@ void ServantHandle::handleOverload(const shared_ptr<TC_EpollServer::RecvContext>
 
 void ServantHandle::handle(const shared_ptr<TC_EpollServer::RecvContext> &data)
 {
-    TarsCurrentPtr current = createCurrent(data);
+	CurrentPtr current = createCurrent(data);
 
-    if (!current) return;
+	if (!current) return;
 
     if (current->getBindAdapter()->isTarsProtocol())
     {
@@ -577,95 +394,95 @@ void ServantHandle::handle(const shared_ptr<TC_EpollServer::RecvContext> &data)
 }
 
 
-#ifdef TARS_OPENTRACKING
-void ServantHandle::processTracking(const TarsCurrentPtr &current)
-{
-    if(!(Application::getCommunicator()->_traceManager))
-    {
-        return;
-    }
-    ServantProxyThreadData * sptd = ServantProxyThreadData::getData();
-    assert(sptd);
+// #ifdef TARS_OPENTRACKING
+// void ServantHandle::processTracking(const TarsCurrentPtr &current)
+// {
+//     if(!(Application::getCommunicator()->_traceManager))
+//     {
+//         return;
+//     }
+//     ServantProxyThreadData * sptd = ServantProxyThreadData::getData();
+//     assert(sptd);
 
-    if(!sptd)
-    {
-        return;
-    }
+//     if(!sptd)
+//     {
+//         return;
+//     }
 
-    //提取packet中的span信息，更新为被调的span信息后设置到sptd->_trackInfoMap;
-    sptd->_trackInfoMap.clear();
+//     //提取packet中的span信息，更新为被调的span信息后设置到sptd->_trackInfoMap;
+//     sptd->_trackInfoMap.clear();
     
-    if (IS_MSG_TYPE(current->getMessageType(), tars::TARSMESSAGETYPETRACK))
-    {
-        map<string, string>::const_iterator trackinfoIter = current->getRequestStatus().find(ServantProxy::STATUS_TRACK_KEY);
-        TLOGTARS("[TARS] servant got a tracking request, message_type set" << current->getMessageType() << endl);
-        if (trackinfoIter != current->getRequestStatus().end())
-        {
-            TLOGTARS("[TARS] servant got a tracking request, tracking key:" << trackinfoIter->second << endl);
-            string context = trackinfoIter->second;
-            char szBuffer[context.size() + 1];
-            memset(szBuffer, 0x00, context.size() + 1);
-            memcpy(szBuffer, context.c_str(), context.size());
+//     if (IS_MSG_TYPE(current->getMessageType(), tars::TARSMESSAGETYPETRACK))
+//     {
+//         map<string, string>::const_iterator trackinfoIter = current->getRequestStatus().find(ServantProxy::STATUS_TRACK_KEY);
+//         TLOGTARS("[TARS] servant got a tracking request, message_type set" << current->getMessageType() << endl);
+//         if (trackinfoIter != current->getRequestStatus().end())
+//         {
+//             TLOGTARS("[TARS] servant got a tracking request, tracking key:" << trackinfoIter->second << endl);
+//             string context = trackinfoIter->second;
+//             char szBuffer[context.size() + 1];
+//             memset(szBuffer, 0x00, context.size() + 1);
+//             memcpy(szBuffer, context.c_str(), context.size());
             
-            std::unordered_map<std::string, std::string> text_map;
-            write_span_context(text_map, szBuffer);
+//             std::unordered_map<std::string, std::string> text_map;
+//             write_span_context(text_map, szBuffer);
 
-            TextMapCarrier carrier(text_map);
-            auto tracer = Application::getCommunicator()->_traceManager->_tracer;
-            auto span_context_maybe = tracer->Extract(carrier);
-            if(!span_context_maybe)
-            {
-                //error
-                TLOGERROR("[TARS] servant got a tracking request, but extract the span context fail");
-                return ;
-            }
+//             TextMapCarrier carrier(text_map);
+//             auto tracer = Application::getCommunicator()->_traceManager->_tracer;
+//             auto span_context_maybe = tracer->Extract(carrier);
+//             if(!span_context_maybe)
+//             {
+//                 //error
+//                 TLOGERROR("[TARS] servant got a tracking request, but extract the span context fail");
+//                 return ;
+//             }
 
-            string funcName = current->getFuncName();
-            auto child_span = tracer->StartSpan(funcName, {opentracing::ChildOf(span_context_maybe->get())});
+//             string funcName = current->getFuncName();
+//             auto child_span = tracer->StartSpan(funcName, {opentracing::ChildOf(span_context_maybe->get())});
             
-            //text_map.clear();
-            auto err = tracer->Inject(child_span->context(), carrier);
-            assert(err);
+//             //text_map.clear();
+//             auto err = tracer->Inject(child_span->context(), carrier);
+//             assert(err);
 
-            sptd->_trackInfoMap = text_map;
+//             sptd->_trackInfoMap = text_map;
 
-            _spanMap[current->getRequestId()].reset(child_span.release());
+//             _spanMap[current->getRequestId()].reset(child_span.release());
 
-            return ;
+//             return ;
 
-        }
-    }
+//         }
+//     }
 
-    return ;
+//     return ;
 
-}
+// }
 
 
-void ServantHandle::finishTracking(int ret, const TarsCurrentPtr &current)
-{
-    int requestId = current->getRequestId();
+// void ServantHandle::finishTracking(int ret, const TarsCurrentPtr &current)
+// {
+//     int requestId = current->getRequestId();
     
-    if(_spanMap.find(requestId) != _spanMap.end())
-    {
-        auto spanIter = _spanMap.find(requestId);
-        spanIter->second->SetTag("Retcode", ret);
-        spanIter->second->Finish();
+//     if(_spanMap.find(requestId) != _spanMap.end())
+//     {
+//         auto spanIter = _spanMap.find(requestId);
+//         spanIter->second->SetTag("Retcode", ret);
+//         spanIter->second->Finish();
 
-        _spanMap.erase(requestId);
-    }
-}
+//         _spanMap.erase(requestId);
+//     }
+// }
 
-#endif
+// #endif
 
-bool ServantHandle::processDye(const TarsCurrentPtr &current, string& dyeingKey)
+bool ServantHandle::processDye(const CurrentPtr &current, string& dyeingKey)
 {
-    //当前线程的线程数据
-    ServantProxyThreadData* sptd = ServantProxyThreadData::getData();
+	//当前线程的线程数据
+	ServantProxyThreadData *sptd = ServantProxyThreadData::getData();
 
-    if (sptd)
-    {
-        sptd->_dyeingKey = "";
-    }
+	if (sptd)
+	{
+		sptd->_data._dyeingKey = "";
+	}
 
     //当前请求已经被染色, 需要打印染色日志
     map<string, string>::const_iterator dyeingIt = current->getRequestStatus().find(ServantProxy::STATUS_DYED_KEY);
@@ -683,11 +500,62 @@ bool ServantHandle::processDye(const TarsCurrentPtr &current, string& dyeingKey)
         return true;
     }
 
+	//servant已经被染色, 开启染色日志
+	if (_application->getServantHelper()->isDyeing())
+	{
+		map<string, string>::const_iterator dyeingKeyIt = current->getRequestStatus().find(ServantProxy::STATUS_GRID_KEY);
+
+		if (dyeingKeyIt != current->getRequestStatus().end() &&
+			_application->getServantHelper()->isDyeingReq(dyeingKeyIt->second, current->getServantName(), current->getFuncName()))
+		{
+			TLOGTARS("[TARS] dyeing servant got a dyeing req, key:" << dyeingKeyIt->second << endl);
+
+			dyeingKey = dyeingKeyIt->second;
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool ServantHandle::processTrace(const CurrentPtr &current)
+{
+    //当前线程的线程数据
+    ServantProxyThreadData* sptd = ServantProxyThreadData::getData();
+
+    if (sptd)
+    {
+        sptd->_traceCall = false;
+        sptd->_traceContext.reset();
+    }
+
+    // 如果调用链需要追踪，需要初始化线程私有追踪参数
+    map<string, string>::const_iterator traceIt = current->getRequestStatus().find(ServantProxy::STATUS_TRACE_KEY);
+
+    if (IS_MSG_TYPE(current->getMessageType(), tars::TARSMESSAGETYPETRACE))
+    {
+        TLOGTARS("[TARS] servant got a trace request, message_type set " << current->getMessageType() << endl);
+
+        if (traceIt != current->getRequestStatus().end())
+        {
+            TLOGTARS("[TARS] servant got a trace request, trace key:" << traceIt->second << endl);
+
+            if (sptd->initTrace(traceIt->second))
+            {
+                sptd->_traceCall = true;
+                return true;
+            }
+            else
+            {
+                TLOGTARS("[TARS] servant got a trace request, but trace key is error:" << traceIt->second << endl);
+            }
+        }
+    }
     return false;
 }
 
-
-bool ServantHandle::processCookie(const TarsCurrentPtr &current, map<string, string> &cookie)
+bool ServantHandle::processCookie(const CurrentPtr &current, map<string, string> &cookie)
 {
 	const static string STATUS = "STATUS_";
 
@@ -701,14 +569,14 @@ bool ServantHandle::processCookie(const TarsCurrentPtr &current, map<string, str
 	return !cookie.empty();
 }
 
-bool ServantHandle::checkValidSetInvoke(const TarsCurrentPtr &current)
+bool ServantHandle::checkValidSetInvoke(const CurrentPtr &current)
 {
-    /*是否允许检查合法性*/
-    if (ServerConfig::IsCheckSet == 0)
-    {
-        //不检查
-        return true;
-    }
+	/*是否允许检查合法性*/
+	if (ServerConfig::IsCheckSet == 0)
+	{
+		//不检查
+		return true;
+	}
 
     bool isSetInvoke = IS_MSG_TYPE(current->getMessageType(), tars::TARSMESSAGETYPESETNAME);
     //客户端按set规则调用且服务端启用set
@@ -728,7 +596,7 @@ bool ServantHandle::checkValidSetInvoke(const TarsCurrentPtr &current)
         {
             TLOGTARS("[servant got a setname request, setname key:" << setIt->second << "]" << endl);
 
-            sSetName = setIt->second;
+			sSetName = setIt->second;
 
             if (ClientConfig::SetDivision == sSetName)
             {
@@ -777,11 +645,11 @@ bool ServantHandle::checkValidSetInvoke(const TarsCurrentPtr &current)
         }
     }
 
-    //没有按set规则调用
-    return true;
+	//没有按set规则调用
+	return true;
 }
 
-void ServantHandle::handleTarsProtocol(const TarsCurrentPtr &current)
+void ServantHandle::handleTarsProtocol(const CurrentPtr &current)
 {
     TLOGTARS("[ServantHandle::handleTarsProtocol current:"
                 << current->getIp() << "|"
@@ -792,11 +660,11 @@ void ServantHandle::handleTarsProtocol(const TarsCurrentPtr &current)
                 << current->getRequestId() << "|"
                 << TC_Common::tostr(current->getRequestStatus()) << "]"<<endl);
 
-    //检查set调用合法性
-    if(!checkValidSetInvoke(current))
-    {
-        return;
-    }
+	//检查set调用合法性
+	if (!checkValidSetInvoke(current))
+	{
+		return;
+	}
 
     //处理染色消息
     string dyeingKey = "";
@@ -806,39 +674,39 @@ void ServantHandle::handleTarsProtocol(const TarsCurrentPtr &current)
         dyeSwitch.enableDyeing(dyeingKey);
     }
 
-    //处理cookie
-    map<string, string> cookie;
-    CookieOp cookieOp;
-    if (processCookie(current, cookie))
-    {
-        cookieOp.setCookie(cookie);
-        current->setCookie(cookie);
-    }
+    processTrace(current);
 
-#ifdef TARS_OPENTRACKING
-    //处理tracking信息
-    processTracking(current);
-#endif
-    auto sit = _servants.find(current->getServantName());
+	//处理cookie
+	map<string, string> cookie;
+	CookieOp cookieOp;
+	if (processCookie(current, cookie))
+	{
+		cookieOp.setCookie(cookie);
+		current->setCookie(cookie);
+	}
+//	processSample(current);
+
+	auto sit = _servants.find(current->getServantName());
 
     if (sit == _servants.end())
     {
         current->sendResponse(TARSSERVERNOSERVANTERR);
-#ifdef TARS_OPENTRACKING
-        finishTracking(TARSSERVERNOSERVANTERR, current);
-#endif
+// #ifdef TARS_OPENTRACKING
+//         finishTracking(TARSSERVERNOSERVANTERR, current);
+// #endif
         return;
     }
 
     int ret = TARSSERVERUNKNOWNERR;
 
-    string sResultDesc = "";
+	string sResultDesc = "";
 
-    vector<char> buffer;
+	ResponsePacket response;
+
     try
     {
         //业务逻辑处理
-        ret = sit->second->dispatch(current, buffer);
+        ret = sit->second->dispatch(current, response.sBuffer);
     }
     catch(TarsDecodeException &ex)
     {
@@ -876,7 +744,7 @@ void ServantHandle::handleTarsProtocol(const TarsCurrentPtr &current)
     //单向调用或者业务不需要同步返回
     if (current->isResponse())
     {
-        current->sendResponse(ret, buffer, Current::TARS_STATUS(), sResultDesc);
+        current->sendResponse(ret, response, Current::TARS_STATUS(), sResultDesc);
     }
 #ifdef TARS_OPENTRACKING
     finishTracking(ret, current);
@@ -892,9 +760,9 @@ void ServantHandle::handleNoTarsProtocol(const TarsCurrentPtr &current)
 
 	auto sit = _servants.find(current->getServantName());
 
-    assert(sit != _servants.end());
+	assert(sit != _servants.end());
 
-    vector<char> buffer;
+	vector<char> buffer;
 
     try
     {
@@ -910,10 +778,10 @@ void ServantHandle::handleNoTarsProtocol(const TarsCurrentPtr &current)
         TLOGERROR("[ServantHandle::handleNoTarsProtocol unknown error]" << endl);
     }
 
-    if (current->isResponse() && !buffer.empty())
-    {
-        current->sendResponse((const char*)buffer.data(), buffer.size());
-    }
+	if (current->isResponse() && !buffer.empty())
+	{
+		current->sendResponse((const char *)(buffer.data()), (uint32_t)buffer.size());
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////

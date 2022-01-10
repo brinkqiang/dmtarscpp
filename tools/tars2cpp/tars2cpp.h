@@ -90,6 +90,11 @@ public:
      */
     void setTarsMaster(bool bTarsMaster) { _tarsMaster = bTarsMaster; }
 
+    /**
+    * 调用链追踪
+    * @param bTrace
+    */
+    void setTrace(bool bTrace) { _bTrace = bTrace; }
 
     //下面是编解码的源码生成
 protected:
@@ -163,7 +168,7 @@ protected:
      *
      * @return string
      */
-    // string promiseReadFrom(const TypeIdPtr &pPtr, bool bIsRequire = true) const;
+    string promiseReadFrom(const TypeIdPtr &pPtr, bool bIsRequire = true) const;
 
     /**
      *
@@ -171,7 +176,7 @@ protected:
      *
      * @return string
      */
-    // string readUnknown(const TypeIdPtr &pPtr) const;
+//    string readUnknown(const TypeIdPtr &pPtr) const;
     /**
      *
      * @param pPtr
@@ -404,7 +409,7 @@ protected:
      *
      * @return string
      */
-//    string generateHPromiseAsync(const InterfacePtr &pInter, const OperationPtr &pPtr) const;
+    string generateHPromiseAsync(const InterfacePtr &pInter, const OperationPtr &pPtr) const;
 
     /**
      * 生成操作函数调用分发的源码
@@ -413,7 +418,7 @@ protected:
      *
      * @return string
      */
-//    string generateDispatchPromiseAsync(const OperationPtr &pPtr, const string &cn) const;
+    string generateDispatchPromiseAsync(const OperationPtr &pPtr, const string &cn) const;
 
     /**
      * 生成操作的servant的头文件源码
@@ -490,7 +495,7 @@ protected:
 
     string generateInitValue(const TypeIdPtr &pPtr) const;
 
-//    bool isPromiseDispatchInitValue(const TypeIdPtr &pPtr) const;
+    bool isPromiseDispatchInitValue(const TypeIdPtr &pPtr) const;
 
 private:
     std::string _baseDir;
@@ -514,6 +519,8 @@ private:
     // bool _unknownField;
 
     bool _tarsMaster;
+
+    bool _bTrace;
 };
 
 #endif

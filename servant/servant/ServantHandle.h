@@ -26,13 +26,15 @@
 #include "util/tc_epoll_server.h"
 #include "servant/Servant.h"
 #include "servant/StatReport.h"
-#include "servant/CoroutineScheduler.h"
-#ifdef TARS_OPENTRACKING
-#include "opentracing/span.h"
-#endif
+
+// #ifdef TARS_OPENTRACKING
+// #include "opentracing/span.h"
+// #endif
 
 namespace tars
 {
+class Application;
+
 //////////////////////////////////////////////////////////////////////////////
 /**
  * 处理网络请求线程
@@ -51,34 +53,18 @@ public:
     /**
      * 构造
      */
-    ServantHandle();
+    ServantHandle(Application *application);
 
     /**
      * 析够
      */
     ~ServantHandle();
 
-	/**
-	 * 线程处理方法
-	 */
-	virtual void run();
-
     /**
-     * 获取协程调度器
+     * get Application
+     * @return
      */
-    CoroutineScheduler* getCoroSched() { return _coroSched; }
-
-protected:
-
-    /**
-     * 处理接收请求的协程函数
-     */
-    virtual void handleRequest();
-
-    /**
-     * 处理请求的协程函数
-     */
-    virtual void handleRecvData(const shared_ptr<TC_EpollServer::RecvContext> &data);
+	Application *getApplication() { return _application; }
 
 protected:
     /**
@@ -110,7 +96,6 @@ protected:
      */
     virtual void handleClose(const shared_ptr<TC_EpollServer::RecvContext> &data);
 
-
 	/**
 	 * handleFilter拆分的第一部分，处理异步调用队列
 	 */
@@ -138,52 +123,59 @@ protected:
      * @param stRecvData
      * @return Current*
      */
-    TarsCurrentPtr createCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data);
+	CurrentPtr createCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data);
 
-    /**
+	/**
      * 创建闭连接时的关上下文
      * @param stRecvData
-     * @return Current*
+     * @return JceCurrent*
      */
-    TarsCurrentPtr createCloseCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data);
+    CurrentPtr createCloseCurrent(const shared_ptr<TC_EpollServer::RecvContext> &data);
 
     /**
      * 处理Tars协议
      *
      * @param current
      */
-    void handleTarsProtocol(const TarsCurrentPtr &current);
+    void handleTarsProtocol(const CurrentPtr &current);
 
     /**
      * 处理非Tars协议
      *
      * @param current
      */
-    void handleNoTarsProtocol(const TarsCurrentPtr &current);
+    void handleNoTarsProtocol(const CurrentPtr &current);
 
 
-#ifdef TARS_OPENTRACKING
-    /**
-     * 处理TARS下的调用链逻辑
-     *
-     * @param current
-     */
-    void processTracking(const TarsCurrentPtr &current);
+// #ifdef TARS_OPENTRACKING
+//     /**
+//      * 处理TARS下的调用链逻辑
+//      *
+//      * @param current
+//      */
+//     void processTracking(const CurrentPtr &current);
 
 
-    void finishTracking(int ret, const TarsCurrentPtr &current);
-#endif
+//     void finishTracking(int ret, const CurrentPtr &current);
+// #endif
     /**
      * 处理TARS下的染色逻辑
      *
      * @param current
      */
-    bool processDye(const TarsCurrentPtr &current, string& dyeingKey);
+    bool processDye(const CurrentPtr &current, string& dyeingKey);
+
+    /**
+     * 处理TARS下的调用链追踪
+     *
+     * @param current
+     */
+    bool processTrace(const CurrentPtr &current);
 
     /**
      * 处理cookie
      */
-    bool processCookie(const TarsCurrentPtr &current, map<string, string> &cookie);
+    bool processCookie(const CurrentPtr &current, map<string, string> &cookie);
 
     /**
      * 检查set调用合法性
@@ -191,8 +183,12 @@ protected:
      * @param current
      * @return bool 如果调用合法返回true，如果调用非法则返回false
      */
-    bool checkValidSetInvoke(const TarsCurrentPtr &current);
+	bool checkValidSetInvoke(const CurrentPtr &current);
 protected:
+	/**
+	 * application
+	 */
+	Application *_application = NULL;
 
     /**
      * 处理对象
@@ -200,14 +196,9 @@ protected:
     unordered_map<string, ServantPtr> _servants;
 
 
-    /**
-     * 协程调度器
-     */
-    CoroutineScheduler     *_coroSched;
-
-#ifdef TARS_OPENTRACKING
-    map<int,std::unique_ptr<opentracing::Span>> _spanMap;
-#endif
+// #ifdef TARS_OPENTRACKING
+//     map<int,std::unique_ptr<opentracing::Span>> _spanMap;
+// #endif
 };
 
 typedef TC_AutoPtr<ServantHandle> ServantHandlePtr;

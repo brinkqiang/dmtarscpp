@@ -13,7 +13,7 @@
  * CONDITIONS OF ANY KIND, either express or implied. See the License for the 
  * specific language governing permissions and limitations under the License.
  */
-
+#include "util/tc_platform.h"
 #include "util/tc_port.h"
 #include "servant/KeepAliveNodeF.h"
 #include "servant/RemoteLogger.h"
@@ -47,10 +47,12 @@ void KeepAliveNodeFHelper::keepAlive(const string &adapter)
 
                     _adapterSet.insert(adapter);
 
-                    if(adapter != "AdminAdapter")
+                    //admin心跳来的时候才上报(减小上报次数)
+                    if(!adapter.empty() && adapter != "AdminAdapter")
                     {
                         return;
                     }
+
                     s.swap(_adapterSet);
                 }
                 ServerInfo si   = _si;

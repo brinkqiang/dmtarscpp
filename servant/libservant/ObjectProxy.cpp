@@ -16,6 +16,7 @@
 
 #include "servant/ObjectProxy.h"
 #include "servant/Communicator.h"
+#include "servant/CommunicatorEpoll.h"
 #include "servant/Global.h"
 #include "servant/EndpointManager.h"
 #include "servant/AppCache.h"
@@ -25,15 +26,15 @@
 
 namespace tars
 {
-////////////////////////////////////////////////////////////////////////////////////////////
-ObjectProxy::ObjectProxy(CommunicatorEpoll * pCommunicatorEpoll, const string & sObjectProxyName,const string& setName)
+///////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////
+ObjectProxy::ObjectProxy(CommunicatorEpoll *pCommunicatorEpoll, ServantProxy *servantProxy, const string & sObjectProxyName,const string& setName)
 : _communicatorEpoll(pCommunicatorEpoll)
+, _sObjectProxyName(sObjectProxyName)
 , _invokeSetId(setName)
 , _isInvokeBySet(false)
-// , _id(0)
-, _hasSetProtocol(false)
-, _conTimeout(1000)
-, _servantProxy(NULL)
+, _servantProxy(servantProxy)
 {
     string::size_type pos = sObjectProxyName.find_first_of('@');
 
@@ -62,20 +63,18 @@ ObjectProxy::ObjectProxy(CommunicatorEpoll * pCommunicatorEpoll, const string & 
 		_name = _name.substr(0,pos);
 	}
 
-    _proxyProtocol.requestFunc = ProxyProtocol::tarsRequest;
-    _proxyProtocol.responseFunc = ProxyProtocol::tarsResponse;
-
-
-    _endpointManger.reset(new EndpointManager(this, _communicatorEpoll->getCommunicator(), sObjectProxyName, pCommunicatorEpoll->isFirstNetThread(), setName));
-
 }
 
 ObjectProxy::~ObjectProxy()
 {
+
 }
 
 void ObjectProxy::initialize()
 {
+    _endpointManger.reset(new EndpointManager(this, _communicatorEpoll->getCommunicator(), _communicatorEpoll->isFirstNetThread()));
+
+    _endpointManger->init(_sObjectProxyName, _invokeSetId);
 }
 
 const vector<AdapterProxy*> & ObjectProxy::getAdapters()
@@ -107,66 +106,47 @@ int ObjectProxy::loadLocator()
     return 0;
 }
 
-void ObjectProxy::setPushCallbacks(const ServantProxyCallbackPtr& cb)
-{
-    _pushCallback = cb;
-}
-
-ServantProxyCallbackPtr ObjectProxy::getPushCallback()
-{
-    return _pushCallback;
-}
-
-void ObjectProxy::setProxyProtocol(const ProxyProtocol& protocol)
-{
-    if(_hasSetProtocol)
-    {
-        return ;
-    }
-
-    _hasSetProtocol = true;
-    _proxyProtocol  = protocol;
-}
-
-ProxyProtocol& ObjectProxy::getProxyProtocol()
-{
-    return _proxyProtocol;
-}
-
-
-void ObjectProxy::setSocketOpt(int level, int optname, const void *optval, SOCKET_LEN_TYPE optlen)
-{
-    SocketOpt socketOpt;
-
-    socketOpt.level      = level;
-    socketOpt.optname    = optname;
-    socketOpt.optval     = optval;
-    socketOpt.optlen     = optlen;
-
-    _socketOpts.push_back(socketOpt);
-}
-
-vector<SocketOpt>& ObjectProxy::getSocketOpt()
-{
-    return _socketOpts;
-}
-//
-//bool ObjectProxy::invoke_sync(ReqMessage * msg)
+//void ObjectProxy::setPushCallbacks(const ServantProxyCallbackPtr& cb)
 //{
-//	TLOGTARS("[ObjectProxy::invoke_sync, " << _name << ", begin]" << endl);
+//    _pushCallback = cb;
+//}
 //
-//	//选择一个远程服务的Adapter来调用
-//	AdapterProxy * pAdapterProxy = NULL;
-//	//选一个活的
-//	_endpointManger->selectAdapterProxy(msg, pAdapterProxy, true);
+//ServantProxyCallbackPtr ObjectProxy::getPushCallback()
+//{
+//    return _pushCallback;
+//}
 //
-//	if(!pAdapterProxy)
-//	{
-//		return false;
-//	}
+//void ObjectProxy::setProxyProtocol(const ProxyProtocol& protocol)
+//{
+//    if(_hasSetProtocol)
+//    {
+//        return ;
+//    }
 //
-//	msg->adapter = pAdapterProxy;
-//	return pAdapterProxy->invoke_sync(msg);
+//    _hasSetProtocol = true;
+//    _proxyProtocol  = protocol;
+//}
+//
+//ProxyProtocol& ObjectProxy::getProxyProtocol()
+//{
+//    return _proxyProtocol;
+//}
+//
+//void ObjectProxy::setSocketOpt(int level, int optname, const void *optval, SOCKET_LEN_TYPE optlen)
+//{
+//    SocketOpt socketOpt;
+//
+//    socketOpt.level        = level;
+//    socketOpt.optname = optname;
+//    socketOpt.optval     = optval;
+//    socketOpt.optlen     = optlen;
+//
+//    _socketOpts.push_back(socketOpt);
+//}
+//
+//vector<SocketOpt>& ObjectProxy::getSocketOpt()
+//{
+//    return _socketOpts;
 //}
 
 void ObjectProxy::invoke(ReqMessage * msg)
@@ -175,7 +155,7 @@ void ObjectProxy::invoke(ReqMessage * msg)
 
     //选择一个远程服务的Adapter来调用
     AdapterProxy * pAdapterProxy = NULL;
-    bool bFirst = _endpointManger->selectAdapterProxy(msg, pAdapterProxy, false);
+    bool bFirst = _endpointManger->selectAdapterProxy(msg, pAdapterProxy);
 
     if(bFirst)
     {
@@ -197,71 +177,78 @@ void ObjectProxy::invoke(ReqMessage * msg)
         msg->response->iRet = TARSADAPTERNULL;
 
         doInvokeException(msg);
-
         return ;
     }
 
 	msg->adapter = pAdapterProxy;
 
     //连接还没有建立, 暂时先放队列里面
-	if(!msg->adapter->getTransceiver()->hasConnected())
+	if(!msg->adapter->trans()->hasConnected())
     {
-        bool bRet = _reqTimeoutQueue.push(msg,msg->request.iTimeout+msg->iBeginTime);
 
-        assert(bRet);
+		bool bRet = _reqTimeoutQueue.push(msg, this->_servantProxy->tars_connect_timeout() + msg->iBeginTime);
+
+		assert(bRet);
 
         //把数据缓存在obj里面
-        TLOGTARS("[ObjectProxy::invoke, " << _name << ", select adapter proxy not connected (have not inovoke reg)]" << endl);
+        TLOGTARS("[ObjectProxy::invoke, " << _name << ", select adapter proxy not connected (have not invoke reg)]" << endl);
         return;
     }
 
     pAdapterProxy->invoke(msg);
 }
 
+void ObjectProxy::prepareConnection(AdapterProxy *adapterProxy)
+{
+    while(!_reqTimeoutQueue.empty())
+    {
+        TLOGTARS("[ObjectProxy::doInvoke, " << _name << ", conection queue pop size:" << _reqTimeoutQueue.size() << "]" << endl);
+
+        ReqMessage * msg = NULL;
+        _reqTimeoutQueue.pop(msg);
+
+        assert(msg != NULL);
+
+        //第一个请求包，adapter必然为NULL，如果需要hash，则重新选择一次
+        if (msg->adapter == NULL && msg->data._hash)
+        {
+            //选取的adapter和之前的不一样(hash的原因), 需要重新选择一个远程服务的Adapter来调用
+            _endpointManger->selectAdapterProxy(msg, adapterProxy);
+
+            if (!adapterProxy)
+            {
+                //这里肯定是请求过主控
+                TLOGERROR("[ObjectProxy::doInvoke, " << _name << ", selectAdapterProxy is null]" << endl);
+                msg->response->iRet = TARSADAPTERNULL;
+                doInvokeException(msg);
+                return;
+            }
+
+            msg->adapter = adapterProxy;
+        }
+        else
+        {
+            msg->adapter = adapterProxy;
+        }
+
+        adapterProxy->invoke(msg);
+    }
+    
+}
 
 void ObjectProxy::onConnect(AdapterProxy *adapterProxy)
 {
-	while(!_reqTimeoutQueue.empty())
-	{
-		TLOGTARS("[ObjectProxy::onConnect, " << _name << ", queue size:" << _reqTimeoutQueue.size() << ", pop...]" << endl);
-
-		ReqMessage * msg = NULL;
-		_reqTimeoutQueue.pop(msg);
-
-		assert(msg != NULL);
-
-		if(msg->adapter != NULL && msg->adapter != adapterProxy)
-		{
-			//选择一个远程服务的Adapter来调用
-			_endpointManger->selectAdapterProxy(msg, adapterProxy, false);
-
-			if (!adapterProxy)
-			{
-				//这里肯定是请求过主控
-				TLOGERROR("[ObjectProxy::onConnect, " << _name << ", selectAdapterProxy is null]" << endl);
-				msg->response->iRet = TARSADAPTERNULL;
-				doInvokeException(msg);
-				return;
-			}
-
-			msg->adapter = adapterProxy;
-		}
-		else
-		{
-			msg->adapter = adapterProxy;
-		}
-
-		adapterProxy->invoke(msg);
-	}
+    prepareConnection(adapterProxy);
 }
 
 void ObjectProxy::onNotifyEndpoints(const set<EndpointInfo> & active,const set<EndpointInfo> & inactive)
 {
-	if(_servantProxy) {
-		_servantProxy->onNotifyEndpoints(this->_communicatorEpoll->getCommunicatorEpollId(), active, inactive);
+	if(this->getRootServantProxy()) {
+		this->getRootServantProxy()->onNotifyEndpoints(_communicatorEpoll, active, inactive);
 	}
 }
 
+//主控查询到地址后过来的
 void ObjectProxy::doInvoke()
 {
     TLOGTARS("[ObjectProxy::doInvoke, objname:" << _name << ", begin...]" << endl);
@@ -273,41 +260,12 @@ void ObjectProxy::doInvoke()
 		AdapterProxy* adapterProxy;
 
 		//选择一个远程服务的Adapter来调用, selectAdapterProxy会发起连接
-		_endpointManger->selectAdapterProxy(msg, adapterProxy, false);
+		_endpointManger->selectAdapterProxy(msg, adapterProxy);
 	}
-//
-//    while(!_reqTimeoutQueue.empty())
-//    {
-//        TLOGTARS("[ObjectProxy::doInvoke, " << _name << ", pop...]" << endl);
-//
-//        ReqMessage * msg = NULL;
-//        _reqTimeoutQueue.pop(msg);
-//
-//        assert(msg != NULL);
-//
-//	    AdapterProxy* adapterProxy;
-//
-//        //选择一个远程服务的Adapter来调用
-//        _endpointManger->selectAdapterProxy(msg, adapterProxy, false);
-//
-//        if (!adapterProxy) {
-//	        //这里肯定是请求过主控
-//	        TLOGERROR("[ObjectProxy::doInvoke, " << _name << ", selectAdapterProxy is null]" << endl);
-//	        msg->response->iRet = JCEADAPTERNULL;
-//	        doInvokeException(msg);
-//	        return;
-//        }
-//
-//        msg->adapter = adapterProxy;
-//
-//	    adapterProxy->invoke(msg);
-//    }
 }
 
 void ObjectProxy::doInvokeException(ReqMessage * msg)
 {
-    // TLOGTARS("[ObjectProxy::doInvokeException, objname:" << _name << "]" << endl);
-
     //单向调用出现异常直接删除请求
     if(msg->eType == ReqMessage::ONE_WAY)
     {
@@ -320,14 +278,11 @@ void ObjectProxy::doInvokeException(ReqMessage * msg)
 
     if(msg->eType == ReqMessage::SYNC_CALL)
     {
-        if(!msg->bCoroFlag)
+        if(!msg->sched)
         {
             assert(msg->pMonitor);
 
-            TC_ThreadLock::Lock sync(*(msg->pMonitor));
-
-            msg->pMonitor->notify();
-            msg->bMonitorFin = true;
+			msg->pMonitor->notify();
         }
         else
         {
@@ -339,65 +294,79 @@ void ObjectProxy::doInvokeException(ReqMessage * msg)
 
     if(msg->callback)
     {
-        if(!msg->bCoroFlag)
-        {
-            if(msg->callback->getNetThreadProcess())
-            {
-                ReqMessagePtr msgPtr = msg;
-                //如果是本线程的回调，直接本线程处理
-                //比如获取endpoint
-                try
+		if(!msg->sched)
+		{
+			if(msg->callback->getNetThreadProcess())
+			{
+				ReqMessagePtr msgPtr = msg;
+				//如果是本线程的回调，直接本线程处理
+				//比如获取endpoint
+				try
+				{
+					msg->callback->dispatch(msgPtr);
+				}
+				catch(exception & e)
+				{
+					TLOGERROR("[ObjectProxy::doInvokeException exp:"<<e.what()<<" ,line:"<<__LINE__<<endl);
+				}
+				catch(...)
+				{
+					TLOGERROR("[ObjectProxy::doInvokeException exp:unknown line:|"<<__LINE__<<endl);
+				}
+			}
+			else
+			{
+                //先确保adapter 非null
+                if (msg->adapter)
                 {
-                    msg->callback->dispatch(msgPtr);
+                    //异步回调，放入回调处理线程中
+                    _communicatorEpoll->pushAsyncThreadQueue(msg);
                 }
-                catch(exception & e)
+                else
                 {
-                    TLOGERROR("ObjectProxy::doInvokeException exp:" << e.what() << " ,line:" << __LINE__ << endl);
+                    TLOGERROR("[ObjectProxy::doInvokeException push adapter is null|" << __LINE__ << endl);
                 }
-                catch(...)
-                {
-                    TLOGERROR("ObjectProxy::doInvokeException exp:unknown line:|" << __LINE__ << endl);
-                }
-            }
-            else
-            {
-                //异步回调，放入回调处理线程中
-                _communicatorEpoll->pushAsyncThreadQueue(msg);
-            }
-        }
-        else
-        {
-            CoroParallelBasePtr ptr = msg->callback->getCoroParallelBasePtr();
-            if(ptr)
-            {
-                ptr->insert(msg);
-                if(ptr->checkAllReqReturn())
-                {
-                    msg->sched->put(msg->iCoroId);
-                }
-            }
-            else
-            {
-                TLOGERROR("ObjectProxy::doInvokeException coro parallel callback error, objname:" << _name << endl);
-                delete msg;
-            }
-        }
+			}
+		}
+		else
+		{
+  
+			CoroParallelBasePtr ptr = msg->callback->getCoroParallelBasePtr();
+			if(ptr)
+			{
+				ptr->insert(msg);
+				if(ptr->checkAllReqReturn())
+				{
+					msg->sched->put(msg->iCoroId);
+				}
+			}
+			else
+			{
+				TLOGERROR("[ObjectProxy::doInvokeException coro parallel callback error,obj:" << _name << endl);
+				delete msg;
+				msg = NULL;
+			}
+        
+		}
     }
 }
 
 void ObjectProxy::doTimeout()
 {
-
     const vector<AdapterProxy*> & vAdapterProxy = _endpointManger->getAdapters();
+
     for(size_t iAdapter=0; iAdapter< vAdapterProxy.size();++iAdapter)
     {
-        vAdapterProxy[iAdapter]->doTimeout();
+        if(vAdapterProxy[iAdapter] != NULL)
+        {
+            vAdapterProxy[iAdapter]->doTimeout();
+        }
     }
 
     ReqMessage * reqInfo = NULL;
     while(_reqTimeoutQueue.timeout(reqInfo))
     {
-        TLOGERROR("[ObjectProxy::doTimeout, objname:" << _name << ", queue timeout error]" << endl);
+//        TLOGERROR("[ObjectProxy::doTimeout, objname:" << _name << ", queue timeout error]" << endl);
 
         reqInfo->response->iRet = TARSINVOKETIMEOUT;
 
@@ -410,7 +379,10 @@ void ObjectProxy::mergeStat(map<StatMicMsgHead, StatMicMsgBody> & mStatMicMsg)
     const vector<AdapterProxy*> & vAdapterProxy = _endpointManger->getAdapters();
     for(size_t iAdapter=0; iAdapter< vAdapterProxy.size();++iAdapter)
     {
-        vAdapterProxy[iAdapter]->mergeStat(mStatMicMsg);
+        if(vAdapterProxy[iAdapter] != NULL)
+        {
+            vAdapterProxy[iAdapter]->mergeStat(mStatMicMsg);
+        }
     }
 }
 
@@ -419,11 +391,15 @@ void ObjectProxy::onSetInactive(const EndpointInfo& ep)
 	const vector<AdapterProxy*> & vAdapterProxy = _endpointManger->getAdapters();
 	for(size_t iAdapter=0; iAdapter< vAdapterProxy.size();++iAdapter)
 	{
-		if(vAdapterProxy[iAdapter]->endpoint() == ep)
-		{
-			vAdapterProxy[iAdapter]->onSetInactive();
-		}
+        if(vAdapterProxy[iAdapter] != NULL)
+        {
+            if (vAdapterProxy[iAdapter]->endpoint() == ep)
+            {
+                vAdapterProxy[iAdapter]->onSetInactive();
+            }
+        }
 	}
 }
-////////////////////////////////////////////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////////////////////////////
 }

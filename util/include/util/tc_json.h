@@ -1,4 +1,19 @@
 ﻿
+/**
+ * Tencent is pleased to support the open source community by making Tars available.
+ *
+ * Copyright (C) 2016THL A29 Limited, a Tencent company. All rights reserved.
+ *
+ * Licensed under the BSD 3-Clause License (the "License"); you may not use this file except 
+ * in compliance with the License. You may obtain a copy of the License at
+ *
+ * https://opensource.org/licenses/BSD-3-Clause
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed 
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the 
+ * specific language governing permissions and limitations under the License.
+ */
 
 #ifndef __TC_JSON_H
 #define __TC_JSON_H
@@ -32,7 +47,8 @@ enum eJsonType
 	eJsonTypeNum,
 	eJsonTypeObj,
 	eJsonTypeArray,
-	eJsonTypeBoolean
+	eJsonTypeBoolean,
+	eJsonTypeNull,
 };
 
 /*
@@ -48,6 +64,27 @@ public:
 	}
 };
 typedef TC_AutoPtr<JsonValue> JsonValuePtr;
+
+/*
+ * json类型 null
+ * json type   null type   
+ */
+class JsonValueNull : public JsonValue
+{
+public:
+	JsonValueNull()
+	{
+	}
+
+	eJsonType getType()
+	{
+		return eJsonTypeNull;
+	}
+	virtual ~JsonValueNull()
+	{
+	}
+};
+typedef TC_AutoPtr<JsonValueNull> JsonValueNullPtr;
 
 /*
  * json类型 string类型 例如"dd\ndfd"
@@ -82,13 +119,17 @@ typedef TC_AutoPtr<JsonValueString> JsonValueStringPtr;
 class JsonValueNum : public JsonValue
 {
 public:
-	JsonValueNum(double d,bool b=false):value(d),isInt(b)
+	JsonValueNum(double d,bool b=false):value(d),lvalue(d),isInt(b)
+	{
+	}
+	JsonValueNum(int64_t d,bool b=true):value(d), lvalue(d),isInt(b)
 	{
 	}
 	JsonValueNum()
 	{
 		isInt=false;
 		value=0.0f;
+		lvalue = 0;
 	}
 	eJsonType getType()
 	{
@@ -97,6 +138,7 @@ public:
 	virtual ~JsonValueNum(){}
 public:
 	double value;
+	int64_t lvalue;
 	bool isInt;
 };
 typedef TC_AutoPtr<JsonValueNum> JsonValueNumPtr;
@@ -160,6 +202,9 @@ typedef TC_AutoPtr<JsonValueArray> JsonValueArrayPtr;
 class JsonValueBoolean : public JsonValue
 {
 public:
+	JsonValueBoolean() {}
+	JsonValueBoolean(bool b): value(b){}
+
 	eJsonType getType()
 	{
 		return eJsonTypeBoolean;
@@ -267,9 +312,9 @@ class TC_Json
 public:
 	//json类型到字符串的转换
 	//Conversion of JSON type to string
-	static string writeValue(const JsonValuePtr & p);
-	static void writeValue(const JsonValuePtr & p, string& ostr);
-	static void writeValue(const JsonValuePtr & p, vector<char>& buf);
+	static string writeValue(const JsonValuePtr & p, bool withSpace = false);
+	static void writeValue(const JsonValuePtr & p, string& ostr, bool withSpace = false);
+	static void writeValue(const JsonValuePtr & p, vector<char>& buf, bool withSpace = false);
 
 	//json字符串到json结构的转换
 	//Conversion of JSON string to JSON structure
@@ -287,11 +332,11 @@ private:
 
 	//obj 类型到json字符串
 	//obj type to json string
-	static void writeObj(const JsonValueObjPtr & p, string& ostr);
+	static void writeObj(const JsonValueObjPtr & p, string& ostr, bool withSpace = false);
 
 	//array 类型到json字符串
 	//array type to json string
-	static void writeArray(const JsonValueArrayPtr & p, string& ostr);
+	static void writeArray(const JsonValueArrayPtr & p, string& ostr, bool withSpace = false);
 
 	//boolean 类型到json字符串
 	//boolean type to json string
@@ -317,7 +362,8 @@ private:
 	static JsonValueBooleanPtr getBoolean(BufferJsonReader & reader,char c);
 	//读取json的 null 如果不符合规范会抛异常
 	//Reading json's null throws an exception if it does not conform to the specification
-	static JsonValuePtr getNull(BufferJsonReader & reader,char c);
+	//static JsonValuePtr getNull(BufferJsonReader & reader,char c);
+	static JsonValueNullPtr getNull(BufferJsonReader & reader,char c);
 	//获取16进制形式的值 如\u003f 如果不符合规范会抛异常
 	//Judging whether a character meets json's definition of a blank character Gets a value in hexadecimal form such as \u003f Throws an exception if it does not conform to the specification
 	static uint32_t getHex(BufferJsonReader & reader);
@@ -330,7 +376,7 @@ private:
 class TC_JsonWriteOstream
 {
 public:
-	static void writeValue(const JsonValuePtr & p, ostream& ostr);
+    static void writeValue(const JsonValuePtr & p, ostream& ostr, bool withSpace = false);
 private:
 	//string 类型到json字符串
 	//stirng type to json string
@@ -343,11 +389,11 @@ private:
 
 	//obj 类型到json字符串
 	//obj type to json string
-	static void writeObj(const JsonValueObjPtr & p, ostream& ostr);
+	static void writeObj(const JsonValueObjPtr & p, ostream& ostr, bool withSpace = false);
 
 	//array 类型到json字符串
 	//array type to json string
-	static void writeArray(const JsonValueArrayPtr & p, ostream& ostr);
+	static void writeArray(const JsonValueArrayPtr & p, ostream& ostr, bool withSpace = false);
 
 	//boolean 类型到json字符串
 	//boolean type to json string

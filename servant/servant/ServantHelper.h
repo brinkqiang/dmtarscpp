@@ -42,7 +42,6 @@ typedef TC_AutoPtr<ServantHelperCreation> ServantHelperCreationPtr;
 /**
  * Servant
  */
-
 template<class T>
 struct ServantCreation : public ServantHelperCreation
 {
@@ -51,12 +50,24 @@ struct ServantCreation : public ServantHelperCreation
     Application *_application;
 };
 
+/**
+ * Servant
+ */
+template<class T, class P>
+struct ServantCreationWithParams : public ServantHelperCreation
+{
+	ServantCreationWithParams(Application *application, const P &p) : _application(application), _p(p) {}
+	ServantPtr create(const string &s) { T *p = new T(_p); p->setName(s); p->setApplication(_application); return p; }
+	Application *_application;
+	P _p;
+};
+
 //////////////////////////////////////////////////////////////////////////////
 //
 /**
  * Servant管理
  */
-class SVT_DLL_API ServantHelperManager : public TC_Singleton<ServantHelperManager>
+class SVT_DLL_API ServantHelperManager// : public TC_Singleton<ServantHelperManager>
 {
 public:
     /**
@@ -77,11 +88,27 @@ public:
     {
         if(check && _servant_adapter.end() == _servant_adapter.find(id))
         {
-            cerr<<"[TARS]ServantHelperManager::addServant "<< id <<" not find adapter.(maybe not conf in the web)"<<endl;
-			throw runtime_error("[TARS]ServantHelperManager::addServant " + id + " not find adapter.(maybe not conf in the web)");
+            cerr<<"[ServantHelperManager::addServant "<< id <<" not find adapter.(maybe not set conf in the web)]"<<endl;
+			throw runtime_error("[ServantHelperManager::addServant " + id + " not find adapter.(maybe not set conf in the web)]");
         }
         _servant_creator[id] = new ServantCreation<T>(application);
     }
+
+	/**
+	 * 添加Servant
+	 * @param T
+	 * @param id
+	 */
+	template<typename T, typename P>
+	void addServant(const string &id, Application *application, const P &p,  bool check = false)
+	{
+		if(check && _servant_adapter.end() == _servant_adapter.find(id))
+		{
+			cerr<<"[TARS]ServantHelperManager::addServant "<< id <<" not find adapter.(maybe not conf in the web)"<<endl;
+			throw runtime_error("[TARS]ServantHelperManager::addServant " + id + " not find adapter.(maybe not conf in the web)");
+		}
+		_servant_creator[id] = new ServantCreationWithParams<T, P>(application, p);
+	}
 
     /**
      * 生成Servant
@@ -121,6 +148,7 @@ public:
      */
     const string &getServantAdapter(const string& sServant) const
     {
+
 	    static const string s = "";
 
 	    auto it = _servant_adapter.find(sServant);
@@ -130,11 +158,12 @@ public:
         }
         return s;
     }
+
     /**
      * 获取Adapter/Servant对应表
      * @return map<string, string>
      */
-    const map<string, string> & getAdapterServant() const {return _adapter_servant;}
+    const map<string, string> &getAdapterServant() const {return _adapter_servant;}
 
     /**
      * 设置染色信息
@@ -153,7 +182,7 @@ public:
      * @param sInterface:接口名称
      * @return string: 设置结果
      */
-    bool isDyeingReq(const string & sKey, const string & sServant, const string & sInterface);
+    bool isDyeingReq(const string & sKey, const string & sServant, const string & sInterface) const;
 
     /**
      * 是否是已经被染色

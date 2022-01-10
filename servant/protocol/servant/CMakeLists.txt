@@ -63,10 +63,14 @@ QueryF.h
 StatF.tars
 StatF.h)
 
+install(DIRECTORY . DESTINATION include/servant
+        PATTERN "*.tars"
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_EXECUTE)
+
 if(WIN32)
 INSTALL(FILES ${TARSPROTOCOLS} DESTINATION   c:\\tarsproto\\protocol\\)
 elseif(APPLE)
 INSTALL(FILES ${TARSPROTOCOLS} DESTINATION   $ENV{HOME}/tarsproto/protocol/)
-elseif(LINUX)
+elseif(UNIX)
 INSTALL(FILES ${TARSPROTOCOLS} DESTINATION   /home/tarsproto/protocol/)
 endif()

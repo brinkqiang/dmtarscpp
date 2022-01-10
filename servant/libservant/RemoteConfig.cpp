@@ -101,42 +101,42 @@ string RemoteConfig::getRemoteFile(const string &sFileName, bool bAppConfigOnly)
 {
     if (_configPrx)
     {
-       string stream;
-       int ret = -1;
-       for(int i = 0; i < 2;i++)
-       {
-           try
-           {
-                if(_setdivision.empty())
-                {
-                    ret = _configPrx->loadConfig(_app, (bAppConfigOnly ? "" : _serverName), sFileName, stream, ServerConfig::Context);
-                }
-                else
-                {
-                    struct ConfigInfo confInfo;
-                    confInfo.appname     = _app;
-                    confInfo.servername  = (bAppConfigOnly ? "" : _serverName);
-                    confInfo.filename    = sFileName;
-                    confInfo.bAppOnly    = bAppConfigOnly;
-                    confInfo.setdivision = _setdivision;
-                    ret = _configPrx->loadConfigByInfo(confInfo,stream, ServerConfig::Context);
-                }
-                
-                break;
-           }catch(std::exception& e){
-            //
-           }catch (...){
-            //
-           }
-       }
+       	string stream;
+       	int ret = -1;
+
+       	for(int i = 0; i < 2;i++)
+       	{
+       		try
+       		{
+       			if(_setdivision.empty())
+       			{
+       				ret = _configPrx->loadConfig(_app, (bAppConfigOnly ? "" : _serverName), sFileName, stream, ServerConfig::Context);
+       			}
+       			else
+       			{
+       				struct ConfigInfo confInfo;
+       				confInfo.appname     = _app;
+       				confInfo.servername  = (bAppConfigOnly ? "" : _serverName);
+       				confInfo.filename    = sFileName;
+       				confInfo.bAppOnly    = bAppConfigOnly;
+       				confInfo.setdivision = _setdivision;
+       				ret = _configPrx->loadConfigByInfo(confInfo,stream, ServerConfig::Context);
+       			}
+
+       			break;
+       		}catch(std::exception& e){
+       		//
+       		}catch (...){
+       			//
+       		}
+	    }
        
-       if (ret != 0 || stream.empty())
-       {
-           throw runtime_error("remote config file is empty:" + sFileName);
-       }
+       	if (ret != 0 || stream.empty())
+       	{
+        	throw runtime_error("remote config file is empty:" + sFileName);
+		}
 
-
-        string newFile = _basePath + "/" + sFileName + "." + TC_Common::tostr(time(NULL));
+        string newFile = _basePath + FILE_SEP + sFileName + "." + TC_Common::tostr(time(NULL));
 
         std::ofstream out(newFile.c_str());
         
@@ -170,11 +170,11 @@ string RemoteConfig::index2file(const string & sFullFileName, int index)
 void RemoteConfig::localRename(const string& oldFile, const string& newFile)
 {
 #if TARGET_PLATFORM_WINDOWS
-	//by goodenpei，windows下面先remove后rename，否则rename会失败
-	if (TC_File::isFileExist(oldFile) && TC_File::isFileExist(newFile))
-	{
-		::remove(newFile.c_str());
-	}
+    //by goodenpei，windows下面先remove后rename，否则rename会失败
+    if(TC_File::isFileExist(oldFile) && TC_File::isFileExist(newFile))
+    {
+        ::remove(newFile.c_str());
+    }
 #endif
     if (::rename(oldFile.c_str(), newFile.c_str()) != 0)
     {

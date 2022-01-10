@@ -20,10 +20,10 @@
 #include <stdexcept>
 #include <string>
 
-using namespace std;
-
 namespace tars
 {
+using namespace std;
+
 /////////////////////////////////////////////////
 /** 
 * @file  tc_ex.h 
@@ -105,6 +105,13 @@ public:
      * @return if get successfully , return 0
      */
     static int getSystemCode();
+
+    /**
+     * @brief 获取系统错误码(linux是errno, windows是GetLastError)
+     *
+     * @return 获取系统错误描述
+     */
+    static string getSystemError();
 
 private:
     void getBacktrace();

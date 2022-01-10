@@ -71,13 +71,13 @@ public:
      * 获取uid
      * @return uint32
      */
-    uint32_t getUId() const;
+	uint32_t getUId() const;
 
-    /**
+	/**
      * 获取fd
      * @return int
      */
-    int getFd() const { return _data->fd(); }
+	int getFd() const { return _data->fd(); }
 
     /**
      * 是否函数返回时发送响应包给客户端
@@ -179,20 +179,26 @@ public:
      * 获取消息类型(仅TARS协议有效)
      * @return tars::Int32
      */
-    tars::Int32 getMessageType() const;
+    Int32 getMessageType() const;
+
+	/**
+	 * 获取接收到请求的时间
+	 */
+	struct timeval getRecvTime() const;
+
+	/**
+	 * 设置是否上报状态报告
+	 */
+	void setReportStat(bool bReport);
+
+	/**
+	 * 获取RequestPacket
+	 * @return
+	 */
+	const RequestPacket &getBasePacket() const { return _request; }
 
     /**
-     * 获取接收到请求的时间
-     */
-    struct timeval getRecvTime() const;
-
-    /**
-     * 设置是否上报状态报告
-     */
-    void setReportStat(bool bReport);
-
-    /**
-     * taf协议的发送响应数据(仅TAF协议有效)
+     * tars协议的发送响应数据(仅TARS协议有效)
      * @param iRet
      * @param status
      * @param buffer
@@ -200,7 +206,7 @@ public:
     void sendResponse(int iRet);
 
     /**
-     * taf协议的发送响应数据(仅TAF协议有效), 直接swapbuffer , 这样可以不用copy 数据
+     * tars协议的发送响应数据(仅TARS协议有效), 直接swapbuffer , 这样可以不用copy 数据
      * @param iRet
      * @param status
      * @param buffer
@@ -208,7 +214,7 @@ public:
 	void sendResponse(int iRet, tars::TarsOutputStream<tars::BufferWriterVector>& os);
 
     /**
-     * taf协议的发送响应数据(仅TAF协议有效), 直接swapbuffer , 这样可以不用copy 数据
+     * tars协议的发送响应数据(仅TARS协议有效), 直接swapbuffer , 这样可以不用copy 数据
      * @param iRet
      * @param status
      * @param buffer
@@ -216,18 +222,84 @@ public:
 	void sendResponse(int iRet, tup::UniAttribute<tars::BufferWriterVector, tars::BufferReader>& attr);
 
 	/**
-	 * taf协议的发送响应数据(仅TAF协议有效)
+	 * tars协议的发送响应数据(仅TARS协议有效)
 	 * @param iRet
 	 * @param buff
 	 */
 	void sendResponse(int iRet, const vector<char> &buff);
 
+    /**
+     * tars协议的发送响应数据(仅TARS协议有效)
+     * @param iRet
+     * @param buff
+     */
+    void sendResponse(int iRet, const string &buff);
+    
 	/**
-     * 普通协议的发送响应数据(非TAF协议有效)
+     * 普通协议的发送响应数据(非TARS协议有效)
      * @param buff
      * @param len
      */
     void sendResponse(const char* buff, uint32_t len);
+
+    /**
+     *
+     * @param iRet
+     * @param response
+     * @param status
+     * @param sResultDesc
+     * @param push
+     */
+	void sendResponse(int iRet, ResponsePacket &response, const map<string, string>& status, const string& sResultDesc);
+    /**
+     * 设置调用链追踪信息，服务端主动回包时用
+     * @param traceCall
+     * @param traceKey
+     */
+	void setTrace(bool traceCall, const string& traceKey);
+
+    /**
+     * 是否需要追踪调用链
+     */
+	bool isTraced() const;
+    /**
+     * 调用链追踪Key
+     */
+	string getTraceKey() const;
+
+	/**
+	 * 服务器端连接是否还存在
+	 * @return
+	 */
+	bool connectionExists() const;
+protected:
+
+    friend class ServantHandle;
+
+    friend class Application;
+
+    /**
+     * 初始化
+     * @param stRecvData
+     */
+    void initialize(const shared_ptr<TC_EpollServer::RecvContext> &data);
+
+	/**
+     * 初始化
+     * @param stRecvData
+     */
+    void initializeClose(const shared_ptr<TC_EpollServer::RecvContext> &data);
+
+    /**
+     * 初始化
+     * @param sRecvBuffer
+     */
+    void initialize(const vector<char> &sRecvBuffer);
+
+    /**
+     * 服务端上报状态，针对单向调用及WUP调用(仅对TARS协议有效)
+     */
+    void reportToStat(const string & sObj);
 
     /**
      * 设置cookie
@@ -244,45 +316,6 @@ public:
     {
         return _cookie;
     }
-
-protected:
-
-    friend class ServantHandle;
-
-    friend class Application;
-
-    /**
-     * 初始化
-     * @param data
-     */
-    void initialize(const shared_ptr<TC_EpollServer::RecvContext> &data);
-
-    /**
-     * 初始化
-     * @param data
-     */
-    void initializeClose(const shared_ptr<TC_EpollServer::RecvContext> &data);
-
-    /**
-     * 初始化
-     * @param sRecvBuffer
-     */
-    void initialize(const vector<char> &sRecvBuffer);
-
-    /**
-     * 服务端上报状态，针对单向调用及TUP调用(仅对TARS协议有效)
-     */
-    void reportToStat(const string & sObj);
-
-    /**
-     * 发送消息
-     * @param iRet
-     * @param response
-     * @param status
-     * @param sResultDesc
-     * @param push
-     */
-	void sendResponse(int iRet, const vector<char> &buffer, const map<string, string>& status, const string& sResultDesc);
 
 protected:
     /**
@@ -323,7 +356,15 @@ protected:
     /**
      * cookie
      */
-    map<string, string>             _cookie;
+    map<string, string>     _cookie;
+
+    /**
+     * 是否是tars协议
+     */
+    bool 					_isTars = false;
+    
+    bool                	_traceCall;
+    string              	_traceKey;
 };
 //////////////////////////////////////////////////////////////
 }

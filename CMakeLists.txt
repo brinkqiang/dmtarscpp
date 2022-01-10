@@ -6,12 +6,13 @@ LIST(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 INCLUDE(cmake/ModuleImport.cmake)
 INCLUDE(cmake/ModuleCompileOptions.cmake)
 ModuleSetCompileOptions()
-
 #-------------------------------------------------------------------
 
 if("${TARS_CPP_COMMON}" STREQUAL "")
 
     set(TARS_CPP_COMMON "1")
+
+    include("${PROJECT_SOURCE_DIR}/cmake/GenVersion.cmake")
 
     include("${PROJECT_SOURCE_DIR}/cmake/Common.cmake")
 
@@ -22,6 +23,17 @@ if("${TARS_CPP_COMMON}" STREQUAL "")
     include("${PROJECT_SOURCE_DIR}/cmake/ParseAsm.cmake")
 
 endif()
+
+# set(major "")
+# set(minor "")
+# set(patch "")
+# get_version(major minor patch)
+
+# set(TARS_VERSION ${major}.${minor}.${patch})
+
+add_definitions(-DTARS_VERSION="${TARS_VERSION}")
+
+message("TARS_VERSION:              ${TARS_VERSION}")
 
 set(CLEAR_INCLUDE "clear-install.cmake")
 FILE(WRITE ${CLEAR_INCLUDE} "EXECUTE_PROCESS(COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_INSTALL_PREFIX}/include)\n")
@@ -41,8 +53,10 @@ ENDIF()
 add_subdirectory(util)
 add_subdirectory(tools)
 add_subdirectory(servant)
-add_subdirectory(examples)
 
-#add_subdirectory(test_deprecated)
+IF (NOT ${ONLY_LIB})
+add_subdirectory(examples)
+add_subdirectory(unit-test)
+ENDIF()
 
 

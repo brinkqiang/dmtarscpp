@@ -144,7 +144,7 @@ int TC_BitMap::BitMap::load5file(const string &sFile)
     char *pBuffer  = new char[iSize];
     while(true)
     {
-        int ret = fread(pBuffer, 1, iSize, fp); 
+        size_t ret = fread(pBuffer, 1, iSize, fp); 
         if(ret == 0)
         {
             break;
@@ -245,7 +245,7 @@ int TC_BitMap::set(size_t i, unsigned iBit)
 
     if(iBit > _bitmaps.size())
     {
-        throw TC_BitMap_Exception("[TC_BitMap::get] bit beyond range:"+TC_Common::tostr(iBit)+">"+TC_Common::tostr(_bitmaps.size())); 
+        throw TC_BitMap_Exception("[TC_BitMap::set] bit beyond range:"+TC_Common::tostr(iBit)+">"+TC_Common::tostr(_bitmaps.size())); 
     }
 
     return _bitmaps[iBit-1].set(i);
@@ -257,7 +257,7 @@ int TC_BitMap::clear(size_t i, unsigned iBit)
 
     if(iBit > _bitmaps.size())
     {
-        throw TC_BitMap_Exception("[TC_BitMap::get] bit beyond range:"+TC_Common::tostr(iBit)+">"+TC_Common::tostr(_bitmaps.size())); 
+        throw TC_BitMap_Exception("[TC_BitMap::clear] bit beyond range:"+TC_Common::tostr(iBit)+">"+TC_Common::tostr(_bitmaps.size())); 
     }
 
     return _bitmaps[iBit-1].clear(i);
@@ -269,7 +269,7 @@ int TC_BitMap::clear4all(unsigned iBit)
 
     if (iBit != (unsigned)(-1) && iBit > _bitmaps.size())
     {
-        throw TC_BitMap_Exception("[TC_BitMap::get] bit beyond range:"+TC_Common::tostr(iBit)+">"+TC_Common::tostr(_bitmaps.size())); 
+        throw TC_BitMap_Exception("[TC_BitMap::clear4all] bit beyond range:"+TC_Common::tostr(iBit)+">"+TC_Common::tostr(_bitmaps.size())); 
     }
 
     for (vector<BitMap>::size_type i = 0; i < _bitmaps.size(); i++)

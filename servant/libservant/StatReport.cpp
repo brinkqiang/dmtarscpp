@@ -18,31 +18,30 @@
 #include "util/tc_common.h"
 #include "util/tc_timeprovider.h"
 #include "servant/RemoteLogger.h"
-#include "servant/Communicator.h"
-#include "servant/Application.h"
 #include <iostream>
+#if TARGET_PLATFORM_LINUX || TARGET_PLATFORM_IOS
+#include <arpa/inet.h>
+#endif
+#include "servant/Application.h"
+#include "servant/Communicator.h"
+#include "servant/CommunicatorEpoll.h"
 
 namespace tars
 {
 //////////////////////////////////////////////////////////////////
 //
-StatReport::StatReport(size_t iEpollNum)
-: _time(0)
+StatReport::StatReport(Communicator* communicator)
+: _communicator(communicator)
+, _time(0)
 , _reportInterval(60000)
 , _reportTimeout(5000)
 , _maxReportSize(MAX_REPORT_SIZE)
 , _terminate(false)
 , _sampleRate(1)
 , _maxSampleCount(500)
-, _epollNum(iEpollNum)
 , _retValueNumLimit(10)
 {
 	srand(time(NULL));
-
-    for(size_t i = 0 ; i < _epollNum; i++)
-    {
-        _statMsg.push_back(new stat_queue(MAX_STAT_QUEUE_SIZE));
-    }
 }
 
 StatReport::~StatReport()
@@ -53,15 +52,6 @@ StatReport::~StatReport()
 
         getThreadControl().join();
     }
-
-    for(size_t i = 0; i < _statMsg.size(); ++i)
-    {
-        if(_statMsg[i])
-        {
-            delete _statMsg[i];
-            _statMsg[i] = NULL;
-        }
-    }
 }
 
 void StatReport::terminate()
@@ -71,19 +61,6 @@ void StatReport::terminate()
     _terminate = true;
 
     notifyAll();
-}
-
-void StatReport::report(size_t iSeq,MapStatMicMsg * pmStatMicMsg)
-{
-    assert(iSeq < _epollNum);
-    bool bFlag = _statMsg[iSeq]->push_back(pmStatMicMsg);
-    if(!bFlag)
-    {
-        delete pmStatMicMsg;
-        pmStatMicMsg = NULL;
-
-        TLOGERROR("[StatReport::report] queue full]" << endl);
-    }
 }
 
 void StatReport::setReportInfo(const StatFPrx& statPrx,
@@ -155,15 +132,17 @@ void StatReport::addStatInterv(int iInterv)
 
     sort(_timePoint.begin(),_timePoint.end());
 
-    unique(_timePoint.begin(),_timePoint.end());
+    auto it = unique(_timePoint.begin(),_timePoint.end());
+
+	_timePoint.resize(std::distance(_timePoint.begin(),it));
 }
 
-void StatReport::getIntervCount(int time,StatMicMsgBody& body)
+void StatReport::getIntervCount(int time, StatMicMsgBody& body)
 {
     int iTimePoint = 0;
     bool bNeedInit = false;
     bool bGetIntev = false;
-    if(body.intervalCount.size() == 0)  //第一次需要将所有描点值初始化为0
+    if (body.intervalCount.size() == 0)  //第一次需要将所有描点值初始化为0
     {
         bNeedInit = true;
     }
@@ -236,22 +215,23 @@ tars.tarsstat to tarsstat
 string StatReport::getServerName(string sModuleName)
 {
     string::size_type pos =  sModuleName.find(".");
-    if(pos != string::npos)
+    if (pos != string::npos)
     {
-         return sModuleName.substr(pos + 1); //+1:过滤.
+        return sModuleName.substr(pos + 1); //+1:过滤.
     }
     return  sModuleName;
 }
 
+
 void StatReport::report(const string& strModuleName,
-                      const string& setdivision,
-                      const string& strInterfaceName,
-                      const string& strModuleIp,
-                      uint16_t iPort,
-                      StatResult eResult,
-                      int iSptime,
-                      int iReturnValue,
-                      bool bFromClient)
+                        const string& setdivision,
+                        const string& strInterfaceName,
+                        const string& strModuleIp,
+                        uint16_t iPort,
+                        StatResult eResult,
+                        int iSptime,
+                        int iReturnValue,
+                        bool bFromClient)
 {
     //包头信息,trim&substr 防止超长导致udp包发送失败
     //masterIp为空服务端自己获取。
@@ -260,9 +240,9 @@ void StatReport::report(const string& strModuleName,
     StatMicMsgBody body;
     string sMaterServerName = "";
     string sSlaveServerName = "";
-    string appName = "";// 由setdivision生成
+    string appName = ""; // 由setdivision生成
 
-    if(bFromClient)
+    if (bFromClient)
     {
         if (!_setName.empty())
         {
@@ -367,13 +347,13 @@ void StatReport::report(const string& strMasterName,
     head.returnValue    = iReturnValue;
 
     //包体信息.
-    if(eResult == STAT_SUCC)
+    if (eResult == STAT_SUCC)
     {
         body.count = 1;
 
         body.totalRspTime = body.minRspTime = body.maxRspTime = iSptime;
     }
-    else if(eResult == STAT_TIMEOUT)
+    else if (eResult == STAT_TIMEOUT)
     {
         body.timeoutCount = 1;
     }
@@ -384,31 +364,15 @@ void StatReport::report(const string& strMasterName,
 
     submit(head, body, true);
 }
-//
-//string StatReport::sampleUnid()
-//{
-//
-//    static atomic<int> g_id(rand());
-//
-//    char s[14] = { 0 };
-//    time_t t                = TNOW;
-//    int ip                  = inet_addr(_ip.c_str());
-//    int thread              = ++g_id;
-//    static unsigned short n = 0;
-//    ++n;
-//    memcpy(s, &ip, 4);
-//    memcpy(s + 4, &t, 4);
-//    memcpy(s + 8, &thread, 4);
-//    memcpy(s + 12, &n, 2);
-//    return TC_Common::bin2str(string(s, 14));
-//}
 
-void StatReport::submit( StatMicMsgHead& head, StatMicMsgBody& body,bool bFromClient )
+void StatReport::submit(StatMicMsgHead& head, StatMicMsgBody& body, bool bFromClient)
 {
     Lock lock(*this);
 
     MapStatMicMsg& msg = (bFromClient == true)?_statMicMsgClient:_statMicMsgServer;
-    MapStatMicMsg::iterator it = msg.find( head );
+
+    auto it = msg.find( head );
+
     if ( it != msg.end() )
     {
         StatMicMsgBody& stBody      = it->second;
@@ -416,12 +380,12 @@ void StatReport::submit( StatMicMsgHead& head, StatMicMsgBody& body,bool bFromCl
         stBody.timeoutCount         += body.timeoutCount;
         stBody.execCount            += body.execCount;
         stBody.totalRspTime         += body.totalRspTime;
-        if ( stBody.maxRspTime < body.maxRspTime )
+        if (stBody.maxRspTime < body.maxRspTime)
         {
             stBody.maxRspTime = body.maxRspTime;
         }
         //非0最小值
-        if ( stBody.minRspTime == 0 ||(stBody.minRspTime > body.minRspTime && body.minRspTime != 0))
+        if (stBody.minRspTime == 0 || (stBody.minRspTime > body.minRspTime && body.minRspTime != 0))
         {
             stBody.minRspTime = body.minRspTime;
         }
@@ -434,37 +398,20 @@ void StatReport::submit( StatMicMsgHead& head, StatMicMsgBody& body,bool bFromCl
     }
 }
 
-size_t StatReport::getQueueSize(size_t epollIndex)
-{
-	if(epollIndex >= _statMsg.size())
-	{
-		return 0;
-	}
-
-	return _statMsg[epollIndex]->size();
-}
-
-//void StatReport::doSample(const string& strSlaveName,
-//                          const string& strInterfaceName,
-//                          const string& strSlaveIp,
-//                          map<string, string>& status)
-//{
-//}
-
-int StatReport::reportMicMsg(MapStatMicMsg& msg,bool bFromClient)
+int StatReport::reportMicMsg(MapStatMicMsg& msg, bool bFromClient)
 {
     if (msg.empty()) return 0;
     try
     {
-       int iLen = 0;
-       MapStatMicMsg  mTemp;
-       MapStatMicMsg  mStatMsg;
-       mStatMsg.clear();
-       mTemp.clear();
-       {
-           Lock lock(*this);
-           msg.swap(mStatMsg);
-       }
+        int iLen = 0;
+        MapStatMicMsg  mTemp;
+        MapStatMicMsg  mStatMsg;
+        mStatMsg.clear();
+        mTemp.clear();
+        {
+            Lock lock(*this);
+            msg.swap(mStatMsg);
+        }
 
        TLOGTARS("[StatReport::reportMicMsg get size:" << mStatMsg.size()<<"]"<< endl);
        for(MapStatMicMsg::iterator it = mStatMsg.begin(); it != mStatMsg.end(); it++)
@@ -505,7 +452,7 @@ int StatReport::reportMicMsg(MapStatMicMsg& msg,bool bFromClient)
        }
        return 0;
     }
-    catch ( exception& e )
+    catch (exception& e)
     {
         TLOGERROR("StatReport::report catch exception:" << e.what() << endl);
     }
@@ -520,7 +467,7 @@ int StatReport::reportPropMsg()
 {
     try
     {
-       MapStatPropMsg mStatMsg;
+        MapStatPropMsg mStatMsg;
 
        {
            Lock lock(*this);
@@ -562,43 +509,43 @@ int StatReport::reportPropMsg()
                vector<pair<string, string> > v = it->second->get();
                for(size_t i = 0; i < v.size(); i++)
                {
-                   bool bFlag = false;
-                   if(v[i].first == "Sum")
-                   {
-                        if(v[i].second != "0")
-                            bFlag = true;
-                   }
-                   else if(v[i].first == "Avg")
-                   {
-                        if(v[i].second != "0")
-                            bFlag = true;
-                   }
-                    else if(v[i].first == "Distr")
-                   {
-                        if(v[i].second != "")
-                            bFlag = true;
-                   }
-                   else if(v[i].first == "Max")
-                   {
-                        if(v[i].second != "-9999999")
-                            bFlag = true;
-                   }
-                   else if(v[i].first == "Min")
-                   {
-                        if(v[i].second != "0")
-                            bFlag = true;
-                   }
-                   else if(v[i].first == "Count")
-                   {
-                        if(v[i].second != "0")
-                            bFlag = true;
-                   }
-                   else
-                   {
-                        bFlag = true;
-                   }
+                //    bool bFlag = false;
+                //    if(v[i].first == "Sum")
+                //    {
+                //         if(v[i].second != "0")
+                //             bFlag = true;
+                //    }
+                //    else if(v[i].first == "Avg")
+                //    {
+                //         if(v[i].second != "0")
+                //             bFlag = true;
+                //    }
+                //     else if(v[i].first == "Distr")
+                //    {
+                //         if(v[i].second != "")
+                //             bFlag = true;
+                //    }
+                //    else if(v[i].first == "Max")
+                //    {
+                //         if(v[i].second != "-9999999")
+                //             bFlag = true;
+                //    }
+                //    else if(v[i].first == "Min")
+                //    {
+                //         if(v[i].second != "0")
+                //             bFlag = true;
+                //    }
+                //    else if(v[i].first == "Count")
+                //    {
+                //         if(v[i].second != "0")
+                //             bFlag = true;
+                //    }
+                //    else
+                //    {
+                //         bFlag = true;
+                //    }
 
-                   if(bFlag)
+                //    if(bFlag)
                    {
                         StatPropInfo sp;
                         sp.policy = v[i].first;
@@ -619,42 +566,42 @@ int StatReport::reportPropMsg()
            }
        }
 
-       TLOGTARS("[StatReport::reportPropMsg get size:" << mStatMsg.size()<<"]"<< endl);
-       int iLen = 0;
-       MapStatPropMsg mTemp;
-       for(MapStatPropMsg::iterator it = mStatMsg.begin(); it != mStatMsg.end(); it++)
-       {
-           const StatPropMsgHead &head = it->first;
-           const StatPropMsgBody &body = it->second;
-           int iTemLen = head.moduleName.length()+ head.ip.length() + head.propertyName.length() + head.setName.length() + head.setArea.length() + head.setID.length();
-           for(size_t i = 0; i < body.vInfo.size(); i++)
-           {
-               iTemLen+=body.vInfo[i].policy.length();
-               iTemLen+=body.vInfo[i].value.length();
-           }
-           iTemLen = PROPERTY_PROTOCOL_LEN + body.vInfo.size(); //
-           iLen = iLen + iTemLen;
-           if(iLen > _maxReportSize) //不能超过udp 1472
-           {
-               if(_propertyPrx)
-               {
-                   TLOGTARS("[StatReport::reportPropMsg send size:" << mTemp.size()<<"]"<< endl);
-                   _propertyPrx->tars_set_timeout(_reportTimeout)->async_reportPropMsg(NULL,mTemp);
-               }
-               iLen = iTemLen;
-               mTemp.clear();
-           }
-           mTemp[it->first] = it->second;
-       }
-       if(0 != (int)mTemp.size())
-       {
-           if(_propertyPrx)
-           {
-               TLOGTARS("[StatReport::reportPropMsg send size:" << mTemp.size()<< "]"<< endl);
-               _propertyPrx->tars_set_timeout(_reportTimeout)->async_reportPropMsg(NULL,mTemp);
-           }
-       }
-       return 0;
+        TLOGTARS("[StatReport::reportPropMsg get size:" << mStatMsg.size() << "]" << endl);
+        int iLen = 0;
+        MapStatPropMsg mTemp;
+        for (MapStatPropMsg::iterator it = mStatMsg.begin(); it != mStatMsg.end(); it++)
+        {
+            const StatPropMsgHead& head = it->first;
+            const StatPropMsgBody& body = it->second;
+            int iTemLen = head.moduleName.length() + head.ip.length() + head.propertyName.length() + head.setName.length() + head.setArea.length() + head.setID.length();
+            for (size_t i = 0; i < body.vInfo.size(); i++)
+            {
+                iTemLen += body.vInfo[i].policy.length();
+                iTemLen += body.vInfo[i].value.length();
+            }
+            iTemLen = PROPERTY_PROTOCOL_LEN + body.vInfo.size(); //
+            iLen = iLen + iTemLen;
+            if (iLen > _maxReportSize) //不能超过udp 1472
+            {
+                if (_propertyPrx)
+                {
+                    TLOGTARS("[StatReport::reportPropMsg send size:" << mTemp.size() << "]" << endl);
+                    _propertyPrx->tars_set_timeout(_reportTimeout)->async_reportPropMsg(NULL, mTemp);
+                }
+                iLen = iTemLen;
+                mTemp.clear();
+            }
+            mTemp[it->first] = it->second;
+        }
+        if (0 != (int)mTemp.size())
+        {
+            if (_propertyPrx)
+            {
+                TLOGTARS("[StatReport::reportPropMsg send size:" << mTemp.size() << "]" << endl);
+                _propertyPrx->tars_set_timeout(_reportTimeout)->async_reportPropMsg(NULL, mTemp);
+            }
+        }
+        return 0;
     }
     catch ( exception& e )
     {
@@ -667,71 +614,16 @@ int StatReport::reportPropMsg()
     return -1;
 }
 
-int StatReport::reportSampleMsg()
+void StatReport::addMicMsg(MapStatMicMsg& old, MapStatMicMsg& add)
 {
-    try
+    auto iter = add.begin();
+    for (; iter != add.end(); ++iter)
     {
-        MMapStatSampleMsg mmStatSampleMsg;
-        {
-            Lock lock(*this);
-            _statSampleMsg.swap(mmStatSampleMsg);
-        }
-
-        TLOGTARS("[StatReport::reportSampleMsg get size:" << mmStatSampleMsg.size()<<"]"<< endl);
-
-        int iLen = 0;
-        vector<StatSampleMsg> vTemp;
-        for(MMapStatSampleMsg::const_iterator it = mmStatSampleMsg.begin() ;it != mmStatSampleMsg.end();++it)
-        {
-           StatSampleMsg sample =  it->second;
-           int iTemLen = STAT_PROTOCOL_LEN +sample.masterName.length() + sample.slaveName.length() + sample.interfaceName.length();
-           iLen = iLen + iTemLen;
-           if(iLen > _maxReportSize) //不能超过udp 1472
-           {
-               if(_statPrx)
-               {
-                   TLOGTARS("[StatReport::reportSampleMsg send size:" << vTemp.size()<< "]"<< endl);
-                   _statPrx->tars_set_timeout(_reportTimeout)->async_reportSampleMsg(NULL,vTemp, ServerConfig::Context);
-               }
-               iLen = iTemLen;
-               vTemp.clear();
-           }
-           vTemp.push_back(sample);
-        }
-        if(0 != (int)vTemp.size())
-        {
-           if(_statPrx)
-           {
-               TLOGTARS("[StatReport::reportSampleMsg send size:" << vTemp.size()<< "]"<< endl);
-               _statPrx->tars_set_timeout(_reportTimeout)->async_reportSampleMsg(NULL,vTemp, ServerConfig::Context);
-           }
-        }
-
-        return 0;
-    }
-    catch ( exception& e )
-    {
-        TLOGERROR("[StatReport::reportSampleMsg catch exception:" << e.what() << "]" << endl);
-    }
-    catch ( ... )
-    {
-        TLOGERROR("[StatReport::reportSampleMsg catch unkown exception]" << endl);
-    }
-    return -1;
-}
-
-void StatReport::addMicMsg(MapStatMicMsg & old,MapStatMicMsg & add)
-{
-    MapStatMicMsg::iterator iter;
-    MapStatMicMsg::iterator iterOld;
-    iter = add.begin();
-    for(;iter != add.end();++iter)
-    {
-        iterOld = old.find(iter->first);
-        if(iterOld == old.end())
+        auto iterOld = old.find(iter->first);
+        if (iterOld == old.end())
         {
             //直接insert
-            old.insert(make_pair(iter->first,iter->second));
+            old.insert(make_pair(iter->first, iter->second));
         }
         else
         {
@@ -740,16 +632,16 @@ void StatReport::addMicMsg(MapStatMicMsg & old,MapStatMicMsg & add)
             iterOld->second.timeoutCount += iter->second.timeoutCount;
             iterOld->second.execCount += iter->second.execCount;
 
-            map<int,int>::iterator iterOldInt,iterInt;
-            map<int,int> & mCount = iter->second.intervalCount;
-            map<int,int> & mCountOld = iterOld->second.intervalCount;
+            map<int, int>::iterator iterOldInt, iterInt;
+            map<int, int>& mCount = iter->second.intervalCount;
+            map<int, int>& mCountOld = iterOld->second.intervalCount;
             iterInt = mCount.begin();
-            for(;iterInt != mCount.end();++iterInt)
+            for (; iterInt != mCount.end(); ++iterInt)
             {
                 iterOldInt = mCountOld.find(iterInt->first);
-                if(iterOldInt == mCountOld.end())
+                if (iterOldInt == mCountOld.end())
                 {
-                    mCountOld.insert(make_pair(iterInt->first,iterInt->second));
+                    mCountOld.insert(make_pair(iterInt->first, iterInt->second));
                 }
                 else
                 {
@@ -775,18 +667,14 @@ void StatReport::run()
         {
             Lock lock(*this);
 
-            if (_terminate)
-                return;
-
             timedWait(1000);
-
         }
 
         try
         {
             time_t tNow = TNOW;
 
-            if(tNow - _time > _reportInterval/1000)
+            if(tNow - _time >= _reportInterval/1000)
             {
                 reportMicMsg(_statMicMsgClient, true);
 
@@ -794,35 +682,23 @@ void StatReport::run()
 
                 MapStatMicMsg mStatMsg;
 
-                for(size_t i = 0; i < _epollNum; ++i)
+                auto communicatorEpolls = _communicator->getAllCommunicatorEpoll();
+
+                for(auto ce : communicatorEpolls)
                 {
                     MapStatMicMsg * pStatMsg;
-                    while(_statMsg[i]->pop_front(pStatMsg))
+                    while(ce->popStatMsg(pStatMsg))
                     {
                         addMicMsg(mStatMsg,*pStatMsg);
                         delete pStatMsg;
                     }
                 }
-#if 0
 
-                ostringstream os;
-                MapStatMicMsg::iterator iter;
-                iter = mStatMsg.begin();
-                for(;iter != mStatMsg.end();++iter)
-                {
-                    iter->first.display(os);
-                    os<<endl;
-                    iter->second.display(os);
-                    os<<endl<<endl;
-                }
-
-                TLOGDEBUG("StatReport::run() msg:"<<os.str()<<endl);
-#endif
                 reportMicMsg(mStatMsg, true);
 
                 reportPropMsg();
 
-                reportSampleMsg();
+//                reportSampleMsg();
 
                 _time = tNow;
             }
@@ -837,6 +713,8 @@ void StatReport::run()
             TLOGERROR("StatReport::run catch unkown exception" << endl);
         }
     }
+
+    ServantProxyThreadData::g_sp.reset();
 }
 
 ////////////////////////////////////////////////////////////////

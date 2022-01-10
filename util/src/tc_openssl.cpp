@@ -201,12 +201,21 @@ void TC_OpenSSL::getMemData(BIO* bio, TC_NetWorkBuffer& buf)
 {
 	while (true)
 	{
-		char data[8*1024];
-		int bytes = BIO_read(bio, data, sizeof(data));
+		auto data = buf.getOrCreateBuffer(2*1024, 8*1024);
+
+		int bytes = BIO_read(bio, data->free(), data->left());
 		if (bytes <= 0)
 			return;
 
-		buf.addBuffer(data, bytes);
+		data->addWriteIdx(bytes);
+		buf.addLength(bytes);
+
+//		char data[8*1024];
+//		int bytes = BIO_read(bio, data, sizeof(data));
+//		if (bytes <= 0)
+//			return;
+
+//		buf.addBuffer(data, bytes);
 	}
 }
 
@@ -214,13 +223,17 @@ int TC_OpenSSL::doSSLRead(SSL* ssl, TC_NetWorkBuffer& out)
 {
 	while (true)
 	{
-		char plainBuf[32 * 1024];
+		auto plainBuf = out.getOrCreateBuffer(8 * 1024, 32 * 1024);
+//		char plainBuf[32 * 1024];
 
 		ERR_clear_error();
-		int bytes = SSL_read(ssl, plainBuf, sizeof plainBuf);
+//		int bytes = SSL_read(ssl, plainBuf, sizeof plainBuf);
+		int bytes = SSL_read(ssl, plainBuf->free(), plainBuf->left());
 		if (bytes > 0)
 		{
-			out.addBuffer(plainBuf, bytes);
+//			out.addBuffer(plainBuf, bytes);
+			plainBuf->addWriteIdx(bytes);
+			out.addLength(bytes);
 		}
 		else
 		{
@@ -276,7 +289,7 @@ shared_ptr<TC_OpenSSL::CTX> TC_OpenSSL::newCtx(const std::string& cafile, const 
 	if (!cafile.empty())
 		mode |= SSL_VERIFY_PEER;
 
-	SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+	SSL_CTX_set_verify(ctx, mode, NULL);
 
 	SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
 	SSL_CTX_clear_options(ctx, SSL_OP_LEGACY_SERVER_CONNECT);

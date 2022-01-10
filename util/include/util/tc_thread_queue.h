@@ -42,7 +42,7 @@ template<typename T, typename D = deque<T> >
 class TC_ThreadQueue
 {
 public:
-    TC_ThreadQueue():_size(0){};
+    TC_ThreadQueue() : _size(0){}
 
 public:
 
@@ -139,12 +139,22 @@ public:
      */
     bool empty() const;
 
+    /**
+     * @brief  无数据则等待.
+     *
+     * @return bool 非空返回true，超时返回false
+     */    
+    bool wait(size_t millsecond);
+
 protected:
 	TC_ThreadQueue(const TC_ThreadQueue&) = delete;
 	TC_ThreadQueue(TC_ThreadQueue&&) = delete;
 	TC_ThreadQueue& operator=(const TC_ThreadQueue&) = delete;
 	TC_ThreadQueue& operator=(TC_ThreadQueue&&) = delete;
 
+    bool hasNotify(size_t lockId) const {
+        return lockId != _lockId;
+    }
 protected:
     /**
      * 队列
@@ -161,6 +171,9 @@ protected:
 
 	//锁
     mutable std::mutex _mutex;
+   
+    //lockId, 判断请求是否唤醒过
+    size_t      _lockId = 0;
 };
 
 template<typename T, typename D> T TC_ThreadQueue<T, D>::front()
@@ -174,24 +187,21 @@ template<typename T, typename D> bool TC_ThreadQueue<T, D>::pop_front(T& t, size
 {
     if(wait) {
 
+        size_t lockId = _lockId;
+
         std::unique_lock<std::mutex> lock(_mutex);
 
-        if (_queue.empty()) {
-            if (millsecond == 0) {
-                return false;
-            }
-            if (millsecond == (size_t) -1) {
-                _cond.wait(lock);
-            }
-            else {
-                //超时了
-                if (_cond.wait_for(lock, std::chrono::milliseconds(millsecond)) == std::cv_status::timeout) {
-                    return false;
-                }
-            }
+        // 此处等待两个条件： 1.来数据了; 2.有人唤醒了.
+        // 任一条件满足都将打破等待立即返回
+        if (millsecond == (size_t) -1) {
+            _cond.wait(lock, [&] { return !_queue.empty() || hasNotify(lockId); });
+        }
+        else if (millsecond > 0) {
+            _cond.wait_for(lock, std::chrono::milliseconds(millsecond), [&] { return !_queue.empty() || hasNotify(lockId); });
         }
 
-        if (_queue.empty()) {
+        // 超时了数据还没到 或 还没超时就被notify打破了, 直接返回
+        if (_queue.empty() || hasNotify(lockId)) {
             return false;
         }
 
@@ -238,6 +248,7 @@ template<typename T, typename D> bool TC_ThreadQueue<T, D>::pop_front()
 template<typename T, typename D> void TC_ThreadQueue<T, D>::notifyT()
 {
 	std::unique_lock<std::mutex> lock(_mutex);
+    ++_lockId;
 	_cond.notify_all();
 }
 
@@ -342,24 +353,22 @@ template<typename T, typename D> void TC_ThreadQueue<T, D>::push_front(const que
 template<typename T, typename D> bool TC_ThreadQueue<T, D>::swap(queue_type &q, size_t millsecond, bool wait)
 {
     if(wait) {
+
+        size_t lockId = _lockId;
+
         std::unique_lock<std::mutex> lock(_mutex);
 
-        if (_queue.empty()) {
-            if (millsecond == 0) {
-                return false;
-            }
-            if (millsecond == (size_t) -1) {
-                _cond.wait(lock);
-            }
-            else {
-                //超时了
-                if (_cond.wait_for(lock, std::chrono::milliseconds(millsecond)) == std::cv_status::timeout) {
-                    return false;
-                }
-            }
+        // 此处等待两个条件： 1.来数据了; 2.notify来了
+        // 任一条件满足都将打破等待立即返回
+        if (millsecond == (size_t) -1) {
+            _cond.wait(lock, [&] { return !_queue.empty() || hasNotify(lockId); });
+        }
+        else if (millsecond > 0) {
+            _cond.wait_for(lock, std::chrono::milliseconds(millsecond), [&] { return !_queue.empty() || hasNotify(lockId); });
         }
 
-        if (_queue.empty()) {
+        // 超时了数据还没到 或 还没超时就被notify唤醒了, 直接返回
+        if (_queue.empty() || hasNotify(lockId)) {
             return false;
         }
 
@@ -401,6 +410,31 @@ template<typename T, typename D> bool TC_ThreadQueue<T, D>::empty() const
 {
 	std::lock_guard<std::mutex> lock(_mutex);
     return _queue.empty();
+}
+
+template<typename T, typename D> bool TC_ThreadQueue<T, D>::wait(size_t millsecond)
+{
+	size_t lockId = _lockId;
+
+    std::unique_lock<std::mutex> lock(_mutex);
+
+    if (_queue.empty()) {
+        if (millsecond == 0) {
+            return false;
+        }
+        if (millsecond == (size_t) -1) {
+	        _cond.wait(lock, [&] { return !_queue.empty() || hasNotify(lockId); });
+//            _cond.wait(lock);
+        }
+        else {
+            //超时了
+//	        _cond.wait_for(lock, std::chrono::milliseconds(millsecond), [&] { return !_queue.empty() || hasNotify(lockId); });
+
+            return _cond.wait_for(lock, std::chrono::milliseconds(millsecond), [&] { return !_queue.empty() || hasNotify(lockId); });
+        }
+    }  
+
+    return !_queue.empty();
 }
 
 }

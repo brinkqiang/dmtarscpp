@@ -15,15 +15,12 @@
  */
 
 #include "util/tc_consistent_hash_new.h"
-// #include "util/tc_autoptr.h"
-// #include "util/tc_hash_fun.h"
 
-using namespace tars;
 
 namespace tars
 {
 
-int32_t TC_KetamaHashAlg::hash(const char *sKey, size_t length)
+int32_t TC_KetamaHashAlg::hash(const char* sKey, size_t length)
 {
     vector<char> sMd5 = TC_MD5::md5bin(sKey, length);
     const char *p = (const char *) sMd5.data();
@@ -41,9 +38,9 @@ TC_HashAlgorithmType TC_KetamaHashAlg::getHashType()
     return E_TC_CONHASH_KETAMAHASH;
 }
 
-int32_t TC_DefaultHashAlg::hash(const char *sKey, size_t length)
+int32_t TC_DefaultHashAlg::hash(const char* sKey, size_t length)
 {
-    vector<char> sMd5 = TC_MD5::md5bin(sKey, length);
+	vector<char> sMd5 = TC_MD5::md5bin(sKey, length);
     const char *p = (const char *) sMd5.data();
 
     int32_t hash = (*(int*)(p)) ^ (*(int*)(p+4)) ^ (*(int*)(p+8)) ^ (*(int*)(p+12));
@@ -129,7 +126,7 @@ void TC_ConsistentHashNew::printNode()
             mapNode[_vHashList[i].iIndex] = value;
         }
 
-        cout << "printNode: " << _vHashList[i].iHashCode << "|" << _vHashList[i].iIndex << "|" << mapNode[_vHashList[i].iIndex] << endl;
+        cout << "printNode: " << _vHashList[i].iHashCode << "|" << _vHashList[i].sNode << "|" << _vHashList[i].iIndex << "|" << mapNode[_vHashList[i].iIndex] << endl;
     }
 
     map<unsigned int, unsigned int>::iterator it = mapNode.begin();
@@ -155,6 +152,7 @@ int TC_ConsistentHashNew::addNode(const string & node, unsigned int index, int w
     }
 
     node_T_new stItem;
+    stItem.sNode = node;
     stItem.iIndex = index;
 
     for (int j = 0; j < weight; j++)
@@ -165,7 +163,7 @@ int TC_ConsistentHashNew::addNode(const string & node, unsigned int index, int w
         // TODO: 其中KEMATA 为参考memcached client 的hash 算法，default 为原有的hash 算法，测试结论在表格里有
         if (_ptrHashAlg->getHashType() == E_TC_CONHASH_KETAMAHASH)
         {
-            vector<char> sMd5 = TC_MD5::md5bin(virtualNode);
+	        vector<char> sMd5 = TC_MD5::md5bin(virtualNode);
             char *p = (char *) sMd5.data();
 
             for (int i = 0; i < 4; i++)
@@ -212,12 +210,12 @@ int TC_ConsistentHashNew::getIndex(int32_t hashcode, unsigned int & iIndex)
     }
 
     // 只保留32位
-    size_t iCode = (hashcode & 0xFFFFFFFFL);
+    int32_t iCode = (hashcode & 0xFFFFFFFFL);
 
     int low = 0;
     int high = (int)_vHashList.size();
 
-    if(iCode <= (size_t)_vHashList[0].iHashCode || iCode > (size_t)_vHashList[high-1].iHashCode)
+    if(iCode <= _vHashList[0].iHashCode || iCode > _vHashList[high-1].iHashCode)
     {
         iIndex = _vHashList[0].iIndex;
         return 0;
@@ -227,7 +225,7 @@ int TC_ConsistentHashNew::getIndex(int32_t hashcode, unsigned int & iIndex)
     while (low < high - 1)
     {
         int mid = (low + high) / 2;
-        if ((size_t)_vHashList[mid].iHashCode > iCode)
+        if (_vHashList[mid].iHashCode > iCode)
         {
             high = mid;
         }
@@ -237,6 +235,57 @@ int TC_ConsistentHashNew::getIndex(int32_t hashcode, unsigned int & iIndex)
         }
     }
     iIndex = _vHashList[low+1].iIndex;
+    return 0;
+}
+
+int TC_ConsistentHashNew::getNodeName(const string & key, string & sNode)
+{
+    if(_ptrHashAlg.get() == NULL || _vHashList.size() == 0)
+    {
+        sNode = "";
+        return -1;
+    }
+
+    vector<char> data = TC_MD5::md5bin(key);
+    int32_t iCode = _ptrHashAlg->hash(data.data(), data.size());
+
+    return getNodeName(iCode, sNode);
+}
+
+int TC_ConsistentHashNew::getNodeName(int32_t hashcode, string & sNode)
+{
+    if(_ptrHashAlg.get() == NULL || _vHashList.size() == 0)
+    {
+        sNode = "";
+        return -1;
+    }
+
+    // 只保留32位
+    int32_t iCode = (hashcode & 0xFFFFFFFFL);
+
+    int low = 0;
+    int high = (int)_vHashList.size();
+
+    if(iCode <= _vHashList[0].iHashCode || iCode > _vHashList[high-1].iHashCode)
+    {
+        sNode = _vHashList[0].sNode;
+        return 0;
+    }
+
+
+    while (low < high - 1)
+    {
+        int mid = (low + high) / 2;
+        if (_vHashList[mid].iHashCode > iCode)
+        {
+            high = mid;
+        }
+        else
+        {
+            low = mid;
+        }
+    }
+    sNode = _vHashList[low+1].sNode;
     return 0;
 }
 

@@ -71,7 +71,7 @@ void TC_Socket::init(int fd, bool bOwner, int iDomain)
 
 void TC_Socket::createSocket(int iSocketType, int iDomain)
 {
-    assert(iSocketType == SOCK_STREAM || iSocketType == SOCK_DGRAM);
+    // assert(iSocketType == SOCK_STREAM || iSocketType == SOCK_DGRAM);
     close();
 
     _iDomain    = iDomain;
@@ -143,7 +143,16 @@ void TC_Socket::bind(const char *sPathName)
     stBindAddr.sun_family = _iDomain;
     strncpy(stBindAddr.sun_path, sPathName, sizeof(stBindAddr.sun_path));
 
-    bind((struct sockaddr *)&stBindAddr, sizeof(stBindAddr));
+    try
+    {
+        bind((struct sockaddr *)&stBindAddr, sizeof(stBindAddr));
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << ", " << sPathName << endl;
+        throw e;
+    }
+
 }
 
 void TC_Socket::connect(const char *sPathName)
@@ -306,7 +315,7 @@ void TC_Socket::parseAddr(const string &host, struct in6_addr &stSinAddr)
 		if(rs != 0)
 		{
 			ostringstream os;
-			os << "DNSException ex:(" << strerror(errno) << ")" << rs << ":" << host << ":" << __FILE__ << ":" << __LINE__;
+			os << "DNSException ex:(" << TC_Exception::parseError(TC_Exception::getSystemCode()) << ")" << rs << ":" << host << ":" << __FILE__ << ":" << __LINE__;
 			if(info != NULL)
 			{
 				freeaddrinfo(info);
@@ -322,6 +331,45 @@ void TC_Socket::parseAddr(const string &host, struct in6_addr &stSinAddr)
     }
 }
 
+void TC_Socket::parseAddr(const addr_type& addr, string& host, uint16_t &port)
+{
+    int iDomain;
+    sockaddr_in6 *addr6;
+    sockaddr_in *addr4;
+    if (addr.second == sizeof(sizeof(struct sockaddr_in6)))
+    {
+        iDomain = AF_INET6;
+        addr6 = (sockaddr_in6 *) addr.first.get();
+    }
+    else
+    {
+        iDomain = AF_INET;
+        addr4 = (sockaddr_in *) addr.first.get();
+    }
+
+    char sAddr[INET6_ADDRSTRLEN] = "\0";
+    inet_ntop(iDomain, (AF_INET6 == iDomain) ? (void *) &(addr6->sin6_addr) : (void *) &addr4->sin_addr, sAddr, sizeof(sAddr));
+    host = sAddr;
+    port = (AF_INET6 == iDomain) ? ntohs(addr6->sin6_port) : ntohs(addr4->sin_port);
+}
+
+TC_Socket::addr_type TC_Socket::createSockAddr(const char *str)
+{
+    TC_Socket::addr_type addr;
+
+    if (TC_Socket::addressIsIPv6(str))
+    {
+        addr.first.reset( (sockaddr *)new sockaddr_in6());
+        addr.second = sizeof(struct sockaddr_in6);
+    }
+    else
+    {
+        addr.first.reset((sockaddr *) new sockaddr_in());
+        addr.second = sizeof(struct sockaddr_in);
+    }
+
+    return addr;
+}
 
 void TC_Socket::parseAddrWithPort(const string& host, int port, struct sockaddr_in& addr)
 {
@@ -372,7 +420,16 @@ void TC_Socket::bind(const string &sServerAddr, int port)
         parseAddrWithPort(sServerAddr, port, bindAddr4);
     }
 
-    bind(bindAddr, len);
+    try
+    {
+        bind(bindAddr, len);
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << ", " << sServerAddr << ":" << port << endl;
+        throw e;
+    }
+    
 }
 
 
@@ -580,6 +637,18 @@ void TC_Socket::setNoCloseWait()
     }
 }
 
+void TC_Socket::setReuseAddr()
+{
+    int iReuseAddr = 1;
+
+    if (setSockOpt(SO_REUSEADDR, (const void *) &iReuseAddr, sizeof(int), SOL_SOCKET) == -1)
+    {
+        THROW_EXCEPTION_SYSCODE(TC_Socket_Exception, "[TC_Socket::setReuseAddr] error");
+        // throw TC_Socket_Exception("[TC_Socket::setNoCloseWait] error", TC_Exception::getSystemCode());
+    }
+
+}
+
 void TC_Socket::setCloseWait(int delay)
 {
     linger stLinger;
@@ -602,7 +671,7 @@ void TC_Socket::setCloseWaitDefault()
 
     if(setSockOpt(SO_LINGER, (const void *)&stLinger, sizeof(linger), SOL_SOCKET) == -1)
     {
-        THROW_EXCEPTION_SYSCODE(TC_Socket_Exception, "[TC_Socket::setCloseWait] error");
+        THROW_EXCEPTION_SYSCODE(TC_Socket_Exception, "[TC_Socket::setCloseWaitDefault] error");
     }
 }
 
@@ -665,7 +734,6 @@ int TC_Socket::getRecvBufferSize() const
     return sz;
 }
 
-
 void TC_Socket::ignoreSigPipe() {
 #ifdef TARGET_PLATFORM_IOS
     int set = 1;
@@ -703,7 +771,7 @@ void TC_Socket::setblock(SOCKET_TYPE fd, bool bBlock)
         THROW_EXCEPTION_SYSCODE(TC_Socket_Exception, "[TC_Socket::setblock] fcntl [F_SETFL] error");
     }
 #else
-	unsigned long ul = 1;
+	unsigned long ul = bBlock ? 0 : 1;
 	
 	int ret;
 	ret = ioctlsocket(fd, FIONBIO, (unsigned long *)&ul);

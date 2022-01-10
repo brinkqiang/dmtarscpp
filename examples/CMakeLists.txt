@@ -1,7 +1,14 @@
 
 add_subdirectory(UtilDemo)
+add_subdirectory(ClientDemo)
 add_subdirectory(CoroutineDemo)
 add_subdirectory(HttpDemo)
+if(TARS_PROTOBUF)
+if(TARS_HTTP2)
+add_subdirectory(GrpcDemo)
+endif()
+endif()
+
 add_subdirectory(CustomDemo)
 add_subdirectory(AuthDemo)
 

@@ -1,5 +1,6 @@
 
-set(TARS_VERSION "2.4.5")
+
+set(TARS_VERSION "3.0.3")
 add_definitions(-DTARS_VERSION="${TARS_VERSION}")
 
 set(CMAKE_VERBOSE_MAKEFILE off)
@@ -11,22 +12,24 @@ ENDIF()
 
 
 #编译的可执行程序输出目录
-#set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-#set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-#set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${EXECUTABLE_OUTPUT_PATH})
-#foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
-    #string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
-    #set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/lib)
-    #set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/lib)
-    #set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${EXECUTABLE_OUTPUT_PATH})
-#endforeach()   
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/bin)
+endforeach()   
 
-option(TARS_OPENTRACKING "option for open tracking" OFF)
+option(ONLY_LIB "option for only lib" ON)
 
-if (TARS_OPENTRACKING)
-    add_definitions(-DTARS_OPENTRACKING=1)
-    set(OPENTRACKING_INC "/usr/local/include")
-endif ()
+# option(TARS_OPENTRACKING "option for open tracking" OFF)
+
+# if (TARS_OPENTRACKING)
+#     add_definitions(-DTARS_OPENTRACKING=1)
+#     set(OPENTRACKING_INC "/usr/local/include")
+# endif ()
 
 # set(TARS_OPENTRACKING $ENV{TARS_OPENTRACKING})
 # if(TARS_OPENTRACKING)
@@ -82,11 +85,14 @@ ELSE ()
     MESSAGE(STATUS "================ ERROR: This platform is unsupported!!! ================")
 ENDIF (UNIX)
 
+IF (WIN32)
+    add_definitions(-DNOMINMAX)
+ENDIF ()
+
 #-------------------------------------------------------------
-set(TARS2CPP "${EXECUTABLE_OUTPUT_PATH}/tars2cpp")
+set(TARS2CPP "${CMAKE_BINARY_DIR}/bin/tars2cpp")
 
 message("----------------------------------------------------")
-
 message("CMAKE_SOURCE_DIR:          ${CMAKE_SOURCE_DIR}")
 message("CMAKE_BINARY_DIR:          ${CMAKE_BINARY_DIR}")
 message("PROJECT_SOURCE_DIR:        ${PROJECT_SOURCE_DIR}")
@@ -95,7 +101,7 @@ message("PLATFORM:                  ${PLATFORM}")
 message("CMAKE_INSTALL_PREFIX:      ${CMAKE_INSTALL_PREFIX}")
 message("BIN:                       ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}") 
 message("TARS2CPP:                  ${TARS2CPP}") 
-message("TARS_OPENTRACKING:         ${TARS_OPENTRACKING}") 
-
+#message("TARS_OPENTRACKING:         ${TARS_OPENTRACKING}")
+message("ONLY_LIB:                  ${ONLY_LIB}" )
 #-------------------------------------------------------------
 

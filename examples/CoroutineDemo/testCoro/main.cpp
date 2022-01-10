@@ -16,7 +16,7 @@
 
 #include "BServant.h"
 #include "servant/Communicator.h"
-#include "servant/CoroutineScheduler.h"
+//#include "servant/CoroutineScheduler.h"
 #include <iostream>
 
 using namespace std;
@@ -24,7 +24,7 @@ using namespace Test;
 using namespace tars;
 
 //继承框架的协程类
-class TestCoroutine : public Coroutine
+class TestCoroutine : public TC_Coroutine
 {
 public:
 	TestCoroutine(int iNum);
@@ -43,7 +43,7 @@ TestCoroutine::TestCoroutine(int iNum)
 : _num(iNum)
 {
 	// _comm.setProperty("locator", "tars.tarsregistry.QueryObj@tcp -h 10.208.139.242 -p 17890 -t 10000");
-    _prx = _comm.stringToProxy<BServantPrx>("TestApp.BServer.BServantObj@tcp -h 127.0.0.1 -p 9100");
+    _prx = _comm.stringToProxy<BServantPrx>("TestApp.BServer.BServantObj@tcp -h 127.0.0.1 -p 9200");
 	// _comm.stringToProxy(_sObj, _prx);
 }
 

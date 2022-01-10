@@ -17,23 +17,28 @@
 #ifndef _TARS_SERVANT_PROXY_H_
 #define _TARS_SERVANT_PROXY_H_
 
+#include "util/tc_common.h"
+#include "util/tc_uuid_generator.h"
 #include "util/tc_monitor.h"
 #include "util/tc_autoptr.h"
+#include "util/tc_proxy_info.h"
+#include "util/tc_singleton.h"
 #include "servant/Message.h"
 #include "servant/AppProtocol.h"
 #include "servant/Current.h"
-//#include "servant/EndpointInfo.h"
-#include "servant/CommunicatorEpoll.h"
-
+#include "servant/EndpointInfo.h"
+#include <tuple>
+#include <cmath>
+#include <algorithm>
 namespace tars
 {
 
+class CommunicatorEpoll;
 class EndpointInfo;
 
 /////////////////////////////////////////////////////////////////////////
-/*
- * seq 管理的类
- */
+
+//seq 管理的类
 class SeqManager
 {
 public:
@@ -49,6 +54,11 @@ public:
      * 构造函数
      */
     SeqManager(uint16_t iNum);
+
+    /**
+     * 析构
+     */ 
+    ~SeqManager(); 
 
     /**
      * 获取seq
@@ -73,16 +83,49 @@ private:
 };
 
 /////////////////////////////////////////////////////////////////////////
+
 /*
  * 线程私有数据
  */
-class ServantProxyThreadData
+class ServantProxyThreadData : public std::enable_shared_from_this<ServantProxyThreadData>
 {
 public:
-    static TC_SpinLock _mutex;
-    static SeqManager *_pSeq;
+	/**
+	 * 全局不死的数据, 私用指针, 且不delete
+     * 业务不需要主动使用该对象!
+	 */
+    class Immortal
+    {
+	public:
+        Immortal();
+        ~Immortal();
+        void add(ServantProxyThreadData *data);
+        void erase(ServantProxyThreadData* data);
+		void erase(Communicator * comm);
+        unordered_set<ServantProxyThreadData *> getList();
+
+        SeqManager *getSeqManager() { return _pSeq.get(); }
+
+    protected:
+		unordered_set<ServantProxyThreadData*> _sp_list;
+
+		TC_ThreadMutex _mutex;
+
+        unique_ptr<SeqManager> _pSeq;
+      
+    };
+
+    static shared_ptr<Immortal> g_immortal;
+
+public:
 
     static thread_local shared_ptr<ServantProxyThreadData> g_sp;
+    static unsigned int _traceParamMaxLen;
+
+    /**
+     * global Immortal ptr, 避免Immortal提前被释放掉
+     */
+     shared_ptr<Immortal> _sp_immortal;
 
     /**
      * 构造函数
@@ -100,70 +143,362 @@ public:
      */
     static ServantProxyThreadData * getData();
 
+    /**
+     * 析构通信器时调用
+     * @param communicator
+     */
+    static void deconstructor(Communicator *communicator);
+
+    /**
+     * move掉
+     */ 
+    ThreadPrivateData move();
+
+    /**
+     * 业务发起调用的线程和网络通信器间都有一个队列
+     */
+    struct CommunicatorEpollReqQueueInfo
+	{
+		weak_ptr<ReqInfoQueue>	_reqQueue;
+		weak_ptr<CommunicatorEpoll> _communicatorEpoll;
+	};
+
+	//每发起调用的线程 记录的 公有网络通信器数据
+	//此时业务线程和
+	struct CommunicatorEpollInfo
+	{
+		/*
+		 * 每个线程跟客户端网络线程通信的队列
+		 * <网络线程序号, 网络通信信息>
+		 */
+		vector<CommunicatorEpollReqQueueInfo> _info;
+		size_t         _netSeq = 0;                             //轮训选择网络线程的偏移量
+		Communicator   *_communicator = NULL;
+	};
+
+	/**
+	 * 业务线程处于协程模式下, 记录当前网络通信器信息
+	 * 此时业务线程和网络通信器是一对一的, 即用自身线程对应的私有网络通信器即可
+	 */
+	struct SchedCommunicatorEpollInfo
+	{
+		CommunicatorEpollReqQueueInfo _info;
+		Communicator   *_communicator = NULL;
+	};
+
+	/**
+	 * 初始化当前业务线程和网络通信器之间的关系(构建发送队列)
+	 */
+	shared_ptr<ServantProxyThreadData::CommunicatorEpollInfo> addCommunicatorEpoll(const shared_ptr<CommunicatorEpoll> &ce);
+
+	/**
+	 * 通信器析构时调用
+	 * @param communicator
+	 */
+	void erase(Communicator *communicator);
+
+	/**
+	 * 获取公有通信器对应的网络通信器等基本信息
+	 * @param communicator
+	 * @return
+	 */
+	shared_ptr<CommunicatorEpollInfo> getCommunicatorEpollInfo(Communicator *communicator);
+
+	/**
+	 * 获取私有通信器对应的网络通信器等基本信息
+	 * @param communicator
+	 * @return
+	 */
+	shared_ptr<SchedCommunicatorEpollInfo> getSchedCommunicatorEpollInfo(Communicator *communicator);
+
+protected:
+	/**
+	 * communicator对应的公用网路通信器
+	 */
+	unordered_map<Communicator*, shared_ptr<CommunicatorEpollInfo>>    _communicatorEpollInfo;
+
+	/**
+	 * 私有的网络通信器, 每个业务线程都对应一个, 业务线程是协程模式下使用
+	 */
+	unordered_map<Communicator*, shared_ptr<SchedCommunicatorEpollInfo>>    _schedCommunicatorEpollInfo;
+
 public:
-    /*
-     * 每个线程跟客户端网络线程通信的队列
-     */
-    ReqInfoQueue * _reqQueue[MAX_CLIENT_THREAD_NUM]; //队列数组
-    bool           _queueInit;                       //是否初始化
-    uint16_t       _reqQNo;                          //请求事件通知的seq
-    size_t         _netSeq;                          //轮训选择网络线程的偏移量
-    int            _netThreadSeq;                     //网络线程发起的请求回到自己的网络线程来处理,其值为网络线程的id
+	//lock
+	TC_ThreadMutex _mutex;
 
-    /**
-     * hash属性,客户端每次调用都进行设置
-     */
-    bool           _hash;                            //是否普通取模hash
-    bool           _conHash;                          //是否一致性hash
-    int64_t        _hashCode;                        //hash值
-
-    /**
-     * 染色信息
-     */
-    bool           _dyeing;                          //标识当前线程是否需要染色
-    string         _dyeingKey;                        //染色的key值
-
-    /**
-     * 允许客户端设置接口级别的超时时间,包括同步和异步、单向
-     */
-    bool           _hasTimeout;                      //是否设置超时间
-    int            _timeout;                         //超时时间
-
-    /**
-     * 保存调用后端服务的地址信息
-     */
-    string           _szHost;                       //调用对端地址
+	//业务线程的序号, 通知网络线程时, 知道用哪个notify来唤醒网路线程
+    uint16_t       _reqQNo;
 
     /**
      * 协程调度
      */
-    CoroutineScheduler*        _sched;                   //协程调度器
+    shared_ptr<TC_CoroutineScheduler>  _sched;
 
-    /**
-     * ObjectProxy
-     */
-    size_t         _objectProxyNum;                  //ObjectProxy对象的个数，其个数由客户端的网络线程数决定，每个网络线程有一个ObjectProxy
+	/**
+	 * 线程私有数据
+	 */
+	ThreadPrivateData       _data;
 
-    /**
-     *  objectProxy Pointer
-     */
-    shared_ptr<ObjectProxy *> _objectProxyOwn;                    //保存ObjectProxy对象的指针数组
-#ifdef TARS_OPENTRACKING
-    std::unordered_map<std::string, std::string> _trackInfoMap;
-#endif
+	/**
+	 * 当前线程是否关联了网络通信器, 如果关联了, 则表示当前线程处于网络线程中!
+	 */
+	CommunicatorEpoll   	*_communicatorEpoll = NULL;
 
+    ///////////////////////////////////////////////////////////////////////////////////////
     /**
-     * cookie
+     * 调用链追踪信息
      */
-    map<string, string>             _cookie;          // cookie内容
+    struct  TraceContext
+    {
+        int    traceType;               // 取值范围0-15， 0 不用打参数， 其他情况按位做控制开关，从低位到高位分别控制CS、CR、SR、SS，为1则输出对应参数
+        unsigned int    paramMaxLen;    // 业务接口参数最大长度，如果超过该值，那么不输出参数，用特殊串标记 {"trace_param_over_max_len":true}
+        string traceID;         // traceID
+        string spanID;          // spanID
+        string parentSpanID;    // 父spanID
+
+        enum E_SpanType
+        {
+            EST_CS = 1,
+            EST_CR = 2,
+            EST_SR = 4,
+            EST_SS = 8,
+            EST_TS,
+            EST_TE,
+        };
+
+        // 是否输出参数
+        enum E_NeedParam
+        {
+            ENP_NO = 0,
+            ENP_NORMAL = 1,
+            ENP_OVERMAXLEN = 2, 
+        };
+
+        // key 分两种情况，1.rpc调用； 2.异步回调
+        // eg: f.2-ee824ad0eb4dacf56b29d230a229c584|030019ac000010796162bc5900000021|030019ac000010796162bc5900000021
+        bool init(const string& k)
+        {
+            vector<string> vs = TC_Common::sepstr<string>(k, "|");
+            if (vs.size() == 2)
+            {
+                traceID = vs[0];
+                parentSpanID = vs[1];
+                spanID = "";
+                auto flags = initType(traceID);
+                traceType = std::get<0>(flags);
+                paramMaxLen = std::get<1>(flags);
+                return true;
+            }
+            else if (vs.size() == 3)
+            {
+                traceID = vs[0];
+                spanID = vs[1];
+                parentSpanID = vs[2];
+                auto flags = initType(traceID);
+                traceType = std::get<0>(flags);
+                paramMaxLen = std::get<1>(flags);
+                return true;
+            }
+            else
+            {
+                reset();
+            }
+            return false;
+        }
+
+        bool open(const string& k)
+        {
+            if (!k.empty())
+            {
+                traceID = k;
+                parentSpanID = "";
+                spanID = "";
+                auto flags = initType(traceID);
+                traceType = std::get<0>(flags);
+                paramMaxLen = std::get<1>(flags);
+                return true;
+            }
+            
+            return false;
+        }
+
+        static std::tuple<int, unsigned int> initType(const string& tid)
+        {
+            int type = 0;
+            unsigned int maxLen = ServantProxyThreadData::getTraceParamMaxLen();
+
+            string::size_type  pos = tid.find("-");
+            if (pos != string::npos)
+            {
+                vector<string> flags = TC_Common::sepstr<string>(tid.substr(0, pos), ".");
+                if (flags.size() >= 1)
+                {
+                    type = strtol(flags[0].c_str(), NULL, 16);
+                }
+                if (flags.size() >= 2)
+                {
+                    maxLen = max(maxLen, TC_Common::strto<unsigned int>(flags[1]));
+                }
+            
+                // type = strtol(tid.substr(0, pos).c_str(), NULL, 16);
+            }
+            if (type < 0 || type > 15)
+            {
+                type = 0;
+            }
+            return make_tuple(type, maxLen);
+        }
+
+        void reset()
+        {
+            traceID = "";
+            spanID = "";
+            parentSpanID = "";
+            traceType = 0;
+            paramMaxLen = 1;
+        }
+
+        TraceContext()
+        {
+        }
+        TraceContext(const string& k)
+        {
+            init(k);
+        }
+
+        void newSpan()
+        {
+            spanID = TC_UUIDGenerator::getInstance()->genID();
+            if (parentSpanID.empty())
+            {
+                parentSpanID = spanID;
+            }
+        }
+
+        string getKey(E_SpanType es) const
+        {
+            switch (es)
+            {
+                case EST_CS:
+                case EST_CR:
+                case EST_TS:
+                case EST_TE:
+                    return traceID + "|" + spanID + "|" + parentSpanID;
+                    break;
+                case EST_SR:
+                case EST_SS:
+                    return traceID + "|" + parentSpanID + "|*";
+                    break;
+                default:
+                    break;
+            }
+            return  "";
+        }
+        string getKey(bool full) const
+        {
+            return full ? (traceID + "|" + spanID + "|" + parentSpanID) : (traceID + "|" + spanID);
+        }
+
+        // return: 0 不需要参数， 1：正常打印参数， 2：参数太长返回默认串
+        static int needParam(E_SpanType es, int type, size_t len, size_t maxLen)
+        {
+            if (es == EST_TS)
+            {
+                es = EST_CS;
+            }
+            else if (es == EST_TE)
+            {
+                es = EST_CR;
+            }
+            if (!(bool)((int)es & type))
+            {
+                return ServantProxyThreadData::TraceContext::ENP_NO;
+            }
+            else if (len > maxLen * 1024)
+            {
+                return ServantProxyThreadData::TraceContext::ENP_OVERMAXLEN;
+            }
+
+            return ServantProxyThreadData::TraceContext::ENP_NORMAL;
+        }
+    };
+
+    bool           _traceCall = false;     //标识当前线程是否需要调用链追踪，默认不打开
+    TraceContext _traceContext;    //调用链追踪信息
+
+    string getTraceKey(TraceContext::E_SpanType es) const
+    {
+        return _traceContext.getKey(es);
+    }
+    string getTraceKey(bool full = false) const
+    {
+        return _traceContext.getKey(full);
+    }
+    void newSpan()
+    {
+        _traceContext.newSpan();
+    }
+    bool initTrace(const string& k)
+    {
+        return _traceContext.init(k);
+    }
+    int getTraceType() const
+    {
+        return _traceContext.traceType;
+    }
+    int needTraceParam(TraceContext::E_SpanType es, size_t len)
+    {
+        return _traceContext.needParam(es, _traceContext.traceType, len, _traceContext.paramMaxLen);
+    }
+
+    /* 业务主动打开调用链
+    *  @param traceFlag: 调用链日志输出参数控制，取值范围0-15， 0 不用打参数， 其他情况按位做控制开关，从低位到高位分别控制CS、CR、SR、SS，为1则输出对应参数
+    *  @param maxLen: 参数输出最大长度， 不传或者默认0， 则按服务模板默认取值
+    */
+    bool openTrace(int traceFlag = 0, unsigned int maxLen = 0)
+    {
+        string traceID = TC_UUIDGenerator::getInstance()->genID();
+        stringstream ss;
+        if (maxLen > 0)
+        {
+            ss << std::hex << traceFlag << "." << maxLen << "-" << traceID;
+        }
+        else
+        {
+            ss << std::hex << traceFlag << "-" << traceID;
+        }
+        _traceCall = _traceContext.open(ss.str()); 
+        return _traceCall;
+    }
+
+    static int needTraceParam(TraceContext::E_SpanType es, const string& k, size_t len)
+    {
+        auto flags = TraceContext::initType(k);
+        int type = std::get<0>(flags);
+        unsigned int maxLen = std::get<1>(flags);
+        return TraceContext::needParam(es, type, len, maxLen);
+    }
+    static void setTraceParamMaxLen(unsigned int len)
+    {
+        // 最最大保护，不超过10M
+        if (len < 1024 * 10)
+        {
+            _traceParamMaxLen = len;
+        }
+    }
+    static unsigned int getTraceParamMaxLen()
+    {
+        return _traceParamMaxLen;
+    }
+    ////////////////////////////////////////////////////////////////////////////////////调用链追踪 end/////
+
 };
-
 
 //////////////////////////////////////////////////////////////////////////
 // 协程并行请求的基类
 class CoroParallelBase : virtual public TC_HandleBase
 {
-public:
+  public:
     /**
      * 构造
      */
@@ -222,27 +557,27 @@ protected:
     /**
      * 并行请求的数目
      */
-    int                        _num;
+    int                     _num;
 
     /**
      * 并行请求的响应还未回来的数目
      */
-    std::atomic<int>     _count;
+    std::atomic<int>        _count;
 
     /**
      * 并行请求的已发送的数目
      */
-    std::atomic<int>      _req_count;
+    std::atomic<int>        _req_count;
 
     /**
      * 互斥锁
      */
-    TC_SpinLock            _mutex;
+    TC_SpinLock             _mutex;
 
     /**
      * 请求的响应的容器
      */
-    vector<ReqMessage*>        _vReqMessage;
+    vector<ReqMessage*>     _vReqMessage;
 };
 typedef TC_AutoPtr<CoroParallelBase> CoroParallelBasePtr;
 
@@ -285,7 +620,7 @@ public:
     /**
      * 设置coro并行请求的共享智能指针
      */
-    virtual void setCoroParallelBasePtr(tars::CoroParallelBasePtr pPtr) { _pPtr = pPtr; }
+    virtual void setCoroParallelBasePtr(CoroParallelBasePtr pPtr) { _pPtr = pPtr; }
 
     /**
      * 获取coro并行请求的共享智能指针
@@ -294,7 +629,7 @@ public:
 
     /**
      * 异步请求是否在网络线程处理
-     * taf内部用的到 业务不能设置这个值
+     * 内部用的到 业务不能设置这个值
      * */
     inline void setNetThreadProcess(bool bNetThreadProcess)
     {
@@ -323,16 +658,17 @@ protected:
     virtual int onDispatch(ReqMessagePtr msg) = 0;
 
     /**
-     * 连接关闭掉了(push callback 才有效)
-     */    
-    virtual void onClose(){};
+     * 连接关闭掉了(push callback 才有效)，老版本的onClose不带ep，为了兼容并且带上ep
+     */
+    virtual void onClose() {};
+    virtual void onClose(const TC_Endpoint& ep) {onClose();};
 
 	/**
 	 * 连接已建立(push callback 才有效)
 	 */
-	virtual void onConnect(const TC_Endpoint &ep){};
+    virtual void onConnect(const TC_Endpoint& ep) {};
 
-	friend class Transceiver;
+	friend class AdapterProxy;
 protected:
 
     /**
@@ -342,7 +678,7 @@ protected:
 
     /**
      * 异步请求是否在网络线程处理
-     * tars内部用的到 业务不能设置这个值
+     * 内部用的到 业务不能设置这个值
      * */
     bool _bNetThreadProcess;
 
@@ -414,9 +750,7 @@ public:
      */
     static string STATUS_DYED_KEY;  //需要染色的用户ID
 
-//    static string STATUS_GRID_KEY;  //需要灰度的用户ID
-
-//    static string STATUS_SAMPLE_KEY; //stat 采样的信息
+    static string STATUS_GRID_KEY;  //需要灰度染色的用户ID
 
     static string STATUS_RESULT_CODE; //处理结果码,tup使用
 
@@ -424,12 +758,22 @@ public:
 
     static string STATUS_SETNAME_VALUE; //set调用
 
-//    static string TARS_MASTER_KEY; //透传主调名称信息
+    static string STATUS_TRACE_KEY; //trace信息
 
-    static string STATUS_TRACK_KEY; //track信息
+///////////////////////////////////////////////////////////////////
+/**
+ * socket选项
+ */
+	struct SocketOpt
+	{
+		int level;
 
-    // static string STATUS_COOKIE; //cookie信息
+		int optname;
 
+		const void *optval;
+
+		SOCKET_LEN_TYPE optlen;
+	};
     /**
      * 缺省的同步调用超时时间
      * 超时后不保证消息不会被服务端处理
@@ -441,30 +785,42 @@ public:
      */
     const static int DEFAULT_CONNECTION_SERIAL = 10;
 
-	/**
+    //自定义回调
+    typedef std::function<void(ReqMessagePtr)> custom_callback;
+
+    /**
 	 * 内置四种协议支持
 	 */
     enum SERVANT_PROTOCOL
     {
     	PROTOCOL_TARS,              //默认tars服务的协议
     	PROTOCOL_HTTP1,             //http协议
-#if TARS_HTTP2
 	    PROTOCOL_HTTP2,             //http2协议
-#endif
+        PROTOCOL_GRPC,              //grpc协议
+    };
+
+    /**
+     * 代理设置
+     */
+    enum SERVANT_PROXY
+    {
+        PROXY_SOCK4, //支持sock4代理
+        PROXY_SOCK5, //支持sock5代理
+        PROXY_HTTP,  //支持http代理
     };
 
     /**
      * 构造函数
      * @param op
      */
-    ServantProxy(Communicator * pCommunicator, ObjectProxy ** ppObjectProxy, size_t iClientThreadNum);
+    ServantProxy(Communicator * pCommunicator, const string& name,const string& setName);
 
     /**
      * 析构函数
      */
     virtual ~ServantProxy();
-public:
 
+public:
     /**
      * 获取Object可用服务列表 如果启用set则获取本set的,如果启用分组,只返回同分组的服务端ip
      *  @return void
@@ -513,8 +869,6 @@ public:
      */
     vector<TC_Endpoint> getEndpoint4All();
 
-public:
-
     /**
      * 获取通信器
      *
@@ -533,9 +887,18 @@ public:
 	void tars_async_ping();
 
     /**
-     * 设置同步调用超时时间，对该proxy上所有方法都有效
-     * @param msecond
-     */
+	 * 设置代理
+	 * @param type
+	 * @param ep
+	 * @param user
+	 * @param pass
+	 */
+    void tars_set_proxy(SERVANT_PROXY type, const TC_Endpoint &ep, const string &user, const string &pass);
+
+    /**
+	 * 设置同步调用超时时间，对该proxy上所有方法都有效
+	 * @param msecond
+	 */
     void tars_timeout(int msecond);
 
     /**
@@ -543,6 +906,12 @@ public:
      * @return int
      */
     int tars_timeout() const;
+
+    /**
+     * 获取连接超时时间
+     * @return int
+     */
+    int tars_connect_timeout() const;
 
     /**
      * 设置连接超时时间
@@ -560,10 +929,16 @@ public:
      * 获取所属的Object名称
      * @return string
      */
-    string tars_name() const;
+    const string &tars_name() const;
+
+    /**
+     * set name
+     * @return
+     */
+	const string &tars_setName() const;
 
 	/**
-	 * 获取所属的Object名称#hash@address
+	 * 获取所属的Object名称#hash@address(即传入stringToProxy中的地址)
 	 * @return string
 	 */
 	string tars_full_name() const;
@@ -601,12 +976,17 @@ public:
      * get protocol
      * @return
      */
-	ProxyProtocol tars_get_protocol();
+	const ProxyProtocol &tars_get_protocol() const;
 
 	/**
     *设置套接字选项
     */
     void tars_set_sockopt(int level, int optname, const void *optval, SOCKET_LEN_TYPE optlen);
+
+    /**
+     * 获取套接字选项
+     */
+    vector<SocketOpt> tars_get_sockopt() const;
 
     /**
      * 设置超时检查参数
@@ -632,13 +1012,15 @@ public:
      */
     virtual ServantProxy* tars_consistent_hash(int64_t key);
 
-//    /**
-//     * 直接同步调用
-//     * @return
-//     */
-//	virtual ServantProxy* taf_direct();
 
-	/**
+    /**
+     * 打开调用链
+     * @param traceParams： 是否输出接口调用参数，默认false， 如果设置为true时 接口调用参数会转为json输出会影响性能
+     * @return ServantProxy*
+     */
+    virtual ServantProxy* tars_open_trace(bool traceParams = false);
+
+    /**
      * 清除当前的Hash数据
      * 空函数 为了兼容以前的
      * @param key
@@ -669,6 +1051,25 @@ public:
     int tars_async_timeout() const;
 
     /**
+     * 主动更新端口
+     * @param active
+     * @param inactive
+     */
+    void tars_update_endpoints(const set<EndpointInfo> &active, const set<EndpointInfo> &inactive);
+
+    /**
+	 * 设置自定义回调(注意不在异步回调线程执行, 而是在网络线程中回调, 注意不要阻塞)
+     * (这种模式下callback hash无效)
+	 * @param callback
+	 */
+    void tars_set_custom_callback(custom_callback callback);
+
+    /**
+     * callback启用hash模式, 根据到服务端连接hash, 即同一个服务端连接过来的请求落入到一个异步回调线程中
+     */
+    void tars_enable_callback_hash();
+
+    /*
      * 用proxy产生一个该object上的序列号
      * @return uint32_t
      */
@@ -680,6 +1081,16 @@ public:
      */
     virtual void tars_set_push_callback(const ServantProxyCallbackPtr& cb);
 
+    /**
+     * 获取PUSH类消息的callback对象
+     */
+    ServantProxyCallbackPtr tars_get_push_callback();
+
+	/**
+	 * 超时策略获取和设置
+	 * @return CheckTimeoutInfo&
+	 */
+	inline const CheckTimeoutInfo& tars_check_timeout_info() const { return _checkTimeoutInfo; }
 
     /**
      * 普通协议同步远程调用
@@ -694,25 +1105,14 @@ public:
                                 const char* buff, uint32_t len,
                                 const ServantProxyCallbackPtr& callback,
                                 bool bCoro = false);
-//
-//
-//	/**
-//	 * http1同步远程调用
-//	 */
-//	void http1_call(const std::string& method,
-//	               const std::string& uri,
-//	               const std::map<std::string, std::string>& headers,
-//	               const std::string& body,
-//	               std::map<std::string, std::string>& rheaders,
-//	               std::string& rbody);
 
 	/**
 	 * http1/2协议同步远程调用
 	 * @param funcName: 调用名称, 这里只是做统计用
 	 */
-	void http_call(const string &funcName, shared_ptr<TC_HttpRequest> &request, shared_ptr<TC_HttpResponse> &response);
+    void http_call(const string &funcName, shared_ptr<TC_HttpRequest> &request, shared_ptr<TC_HttpResponse> &response);
 
-	/**
+    /**
 	 * http1/2协议异步远程调用
 	 * @param funcName: 调用名称, 这里只是做统计用
 	 */
@@ -757,14 +1157,52 @@ public:
                                   const map<string, string>& status,
                                   const ServantProxyCallbackPtr& callback,
                                   bool bCoro = false);
-
 	/**
+	 * 获取所有objectproxy(包括子servant), 该函数主要给自动测试使用!
+	 * @return
+	 */
+    vector<ObjectProxy*> getObjectProxys();
+protected:
+    /**
 	 * 获得可以复用的servant
 	 * @return
 	 */
-	ServantPrx getServantPrx(ReqMessage *msg);
+    ServantPrx getServantPrx(ReqMessage *msg);
 
-	friend class ServantProxyCallback;
+    /**
+     * get proxy info
+     */
+	inline const std::shared_ptr<TC_ProxyInfo::ProxyBaseInfo>& getProxyInfo() { return _proxyBaseInfo; }
+
+	/**
+	 *
+	 */
+    void tars_initialize();
+
+    /**
+     *
+     * @param prx
+     * @param f
+     */
+	void travelObjectProxys(ServantProxy *prx, function<void(ObjectProxy*)> f);
+
+    friend class ServantProxyCallback;
+	friend class Communicator;
+    friend class ServantProxyFactory;
+
+private:
+
+    /**
+     * 获取第一个ObjectProxy
+     * @return
+     */
+    ObjectProxy *getObjectProxy(size_t netThreadSeq = 0);
+
+    /**
+     *
+     * @param func
+     */
+    void forEachObject(std::function<void(ObjectProxy*)> func);
 
 private:
     /**
@@ -781,30 +1219,12 @@ private:
      */
 	int servant_invoke(ReqMessage *msg, bool bCoroAsync);
 
-//    /**
-//     * invoke 异步
-//     * @param msg
-//     * @param pSptd
-//     * @param pReqQ
-//     * @param bCoroAsync
-//     */
-//    void invoke_async(ReqMessage *msg, ServantProxyThreadData *pSptd,  ReqInfoQueue *pReqQ, bool bCoroAsync);
-
-//    /**
-//     * invoke 同步
-//     * @param msg
-//     * @param pSptd
-//     * @param pReqQ
-//     */
-//	void invoke_sync(ReqMessage *msg, ServantProxyThreadData *pSptd,  ReqInfoQueue *pReqQ);
-
-	/**
+    /**
      * 选取一个网络线程对应的信息
      * @param pSptd
      * @return void
      */
-    void selectNetThreadInfo(ServantProxyThreadData * pSptd, ObjectProxy * & pObjProxy, ReqInfoQueue * & pReqQ);
-
+    void selectNetThreadInfo(ServantProxyThreadData *pSptd, ObjectProxy *&pObjProxy, shared_ptr<ReqInfoQueue> &pReqQ);
     /**
      * 检查是否需要设置染色消息
      * @param  req
@@ -812,16 +1232,22 @@ private:
     void checkDye(RequestPacket& req);
 
     /**
+     * 检查是否需要设置调用链追踪
+     * @param  req
+     */
+    void checkTrace(RequestPacket &req);
+
+    /**
      * 更新endpoint
      * @param active
      * @param inactive
      */
-	void onNotifyEndpoints(size_t netThreadSeq, const set<EndpointInfo> & active,const set<EndpointInfo> & inactive);
+	void onNotifyEndpoints(CommunicatorEpoll *communicatorEpoll, const set<EndpointInfo> & active,const set<EndpointInfo> & inactive);
 
 	/**
 	 * 端口不活跃
 	 */
-	void onSetInactive(const EndpointInfo& ep);
+    void onSetInactive(const EndpointInfo &ep);
     /**
      * 检查是否需要设置cookie
      * @param  req
@@ -831,6 +1257,7 @@ private:
 private:
     friend class ObjectProxy;
     friend class AdapterProxy;
+    friend class CommunicatorEpoll;
 
     /**
      * 通信器
@@ -840,14 +1267,7 @@ private:
     /**
      * 保存ObjectProxy对象的指针数组
      */
-    ObjectProxy **              _objectProxy;                    //保存ObjectProxy对象的指针数组
-    shared_ptr<ObjectProxy *>   _objectProxyOwn;                    //保存ObjectProxy对象的指针数组
-
-    /**
-     * ObjectProxy对象的个数，其个数由客户端的网络线程数决定，
-     * 每个网络线程有一个ObjectProxy
-     */
-    size_t                      _objectProxyNum;
+    ObjectProxy *               _objectProxy;  //保存ObjectProxy对象的指针数组
 
     /**
      * 同步调用超时(毫秒)
@@ -889,10 +1309,10 @@ private:
      */
 	ServantPrx                  _rootPrx;
 
-	/**
+    /**
 	 *
 	 */
-	int                         _servantId = 0;
+    std::atomic<int> _servantId{0};
 
 	/**
 	 *
@@ -903,6 +1323,47 @@ private:
 	 *
 	 */
 	vector<ServantPrx>          _servantList;
+
+	/**
+	 * 代理的基本信息
+	 */
+    std::shared_ptr<TC_ProxyInfo::ProxyBaseInfo>     _proxyBaseInfo;
+
+    /**
+	 * custom callback
+	 */
+    custom_callback _callback;
+
+    /**
+     * callback hash
+     */
+    bool _callbackHash = false;
+
+    /**
+     * 链接超时
+     */
+    int _connTimeout = DEFAULT_ASYNCTIMEOUT;
+
+	/*
+	 * 请求和响应的协议解析器
+	 */
+	ProxyProtocol                         _proxyProtocol;
+
+	/*
+	 * push消息 callback
+	 */
+	ServantProxyCallbackPtr               _pushCallback;
+
+	/*
+	 * 超时控制策略信息
+	 */
+	CheckTimeoutInfo                      _checkTimeoutInfo;
+
+	/*
+	 * socket选项
+	 */
+	vector<SocketOpt>                     _socketOpts;
+
 };
 }
 #endif
