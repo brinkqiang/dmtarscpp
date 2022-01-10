@@ -122,7 +122,7 @@ if (WIN32)
     endif()
 
     ExternalProject_Add(ADD_${LIB_GTEST}
-            URL http://cdn.tarsyun.com/src/release-1.10.0.zip
+            URL https://github.com/brinkqiang/dmcdn/blob/master/release-1.10.0.zip
             DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
             PREFIX ${CMAKE_BINARY_DIR}
             INSTALL_DIR ${CMAKE_SOURCE_DIR}
@@ -131,7 +131,7 @@ if (WIN32)
             BUILD_IN_SOURCE 1
             BUILD_COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE}
             INSTALL_COMMAND ${CMAKE_COMMAND} --build . --config  ${CMAKE_BUILD_TYPE}  --target install
-            URL_MD5 82358affdd7ab94854c8ee73a180fc53
+            URL_MD5 1e43300b309686f96e09d5719e22817c
             )
 else()
     set(LIB_GTEST "gtest")
