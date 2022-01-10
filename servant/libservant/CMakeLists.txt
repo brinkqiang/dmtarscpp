@@ -4,7 +4,7 @@
 include_directories(${PROJECT_SOURCE_DIR})
 # endif()
 
-set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
+#set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
 aux_source_directory(. DIR_SRCS)
 

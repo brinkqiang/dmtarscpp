@@ -14,3 +14,4 @@ _deps
 /lib/*
 /build/*
 /.vscode/*
+/clear-install.cmake
