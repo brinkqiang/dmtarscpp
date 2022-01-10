@@ -91,7 +91,7 @@ ENDIF ()
 
 #-------------------------------------------------------------
 set(TARS2CPP "$<TARGET_FILE:tars2cpp>")
-$<TARGET_FILE:tgt>
+
 message("----------------------------------------------------")
 message("CMAKE_SOURCE_DIR:          ${CMAKE_SOURCE_DIR}")
 message("CMAKE_BINARY_DIR:          ${CMAKE_BINARY_DIR}")
