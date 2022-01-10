@@ -22,7 +22,7 @@ ENDIF()
 #    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_BINARY_DIR}/bin)
 #endforeach()   
 
-option(ONLY_LIB "option for only lib" ON)
+option(ONLY_LIB "option for only lib" OFF)
 
 # option(TARS_OPENTRACKING "option for open tracking" OFF)
 
