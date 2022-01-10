@@ -90,7 +90,7 @@ IF (WIN32)
 ENDIF ()
 
 #-------------------------------------------------------------
-set(TARS2CPP "${CMAKE_BINARY_DIR}/bin/tars2cpp")
+set(TARS2CPP "${EXECUTABLE_OUTPUT_PATH}/tars2cpp")
 
 message("----------------------------------------------------")
 message("CMAKE_SOURCE_DIR:          ${CMAKE_SOURCE_DIR}")
