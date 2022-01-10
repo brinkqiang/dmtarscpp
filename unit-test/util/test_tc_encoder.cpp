@@ -3,7 +3,7 @@
 //
 
 #include "util/tc_encoder.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 #include "util/tc_common.h"
 
 using namespace tars;

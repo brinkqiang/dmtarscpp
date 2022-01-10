@@ -1,6 +1,6 @@
 ﻿#include "util/tc_common.h"
 #include <thread>
-#include "gtest/gtest.h"
+#include "gtest.h"
 #include "test_server.h"
 
 using namespace tars;

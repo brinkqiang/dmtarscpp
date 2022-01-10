@@ -3,7 +3,7 @@
 //
 
 #include "util/tc_file.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 using namespace tars;
 

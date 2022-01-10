@@ -4,7 +4,7 @@
 #include "util/tc_autoptr.h"
 #include "util/tc_spin_lock.h"
 #include "util/tc_thread_queue.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 #include <mutex>
 #include <iostream>

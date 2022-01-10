@@ -114,44 +114,44 @@ if(WIN32)
     INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/curl/ DESTINATION thirdparty)
 endif(WIN32)
 
-if (WIN32)
-    set(LIB_GTEST "gtest")
+#if (WIN32)
+#    set(LIB_GTEST "gtest")
+#
+#    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+#        set(LIB_GTEST "${LIB_GTEST}d")
+#    endif()
+#
+#    ExternalProject_Add(ADD_${LIB_GTEST}
+#            URL https://github.com/brinkqiang/dmcdn/blob/master/release-1.10.0.zip
+#            DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
+#            PREFIX ${CMAKE_BINARY_DIR}
+#            INSTALL_DIR ${CMAKE_SOURCE_DIR}
+#            CONFIGURE_COMMAND ${CMAKE_COMMAND} . -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/src/gtest -A x64 -Dgtest_force_shared_crt=on
+#            SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gtest-lib
+#            BUILD_IN_SOURCE 1
+#            BUILD_COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE}
+#            INSTALL_COMMAND ${CMAKE_COMMAND} --build . --config  ${CMAKE_BUILD_TYPE}  --target install
+#            URL_MD5 1e43300b309686f96e09d5719e22817c
+#            )
+#else()
+#    set(LIB_GTEST "gtest")
+#
+#    ExternalProject_Add(ADD_${LIB_GTEST}
+#            URL https://github.com/brinkqiang/dmcdn/blob/master/release-1.10.0.zip
+#            DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
+#            PREFIX ${CMAKE_BINARY_DIR}
+#            INSTALL_DIR ${CMAKE_SOURCE_DIR}
+#            CONFIGURE_COMMAND ${CMAKE_COMMAND} . -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/src/gtest
+#            SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gtest-lib
+#            BUILD_IN_SOURCE 1
+#            BUILD_COMMAND make
+#            URL_MD5 1e43300b309686f96e09d5719e22817c
+#            )
+#endif()
 
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(LIB_GTEST "${LIB_GTEST}d")
-    endif()
+#INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/gtest/ DESTINATION thirdparty)
 
-    ExternalProject_Add(ADD_${LIB_GTEST}
-            URL https://github.com/brinkqiang/dmcdn/blob/master/release-1.10.0.zip
-            DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
-            PREFIX ${CMAKE_BINARY_DIR}
-            INSTALL_DIR ${CMAKE_SOURCE_DIR}
-            CONFIGURE_COMMAND ${CMAKE_COMMAND} . -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/src/gtest -A x64 -Dgtest_force_shared_crt=on
-            SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gtest-lib
-            BUILD_IN_SOURCE 1
-            BUILD_COMMAND ${CMAKE_COMMAND} --build . --config ${CMAKE_BUILD_TYPE}
-            INSTALL_COMMAND ${CMAKE_COMMAND} --build . --config  ${CMAKE_BUILD_TYPE}  --target install
-            URL_MD5 1e43300b309686f96e09d5719e22817c
-            )
-else()
-    set(LIB_GTEST "gtest")
-
-    ExternalProject_Add(ADD_${LIB_GTEST}
-            URL https://github.com/brinkqiang/dmcdn/blob/master/release-1.10.0.zip
-            DOWNLOAD_DIR ${CMAKE_SOURCE_DIR}/download
-            PREFIX ${CMAKE_BINARY_DIR}
-            INSTALL_DIR ${CMAKE_SOURCE_DIR}
-            CONFIGURE_COMMAND ${CMAKE_COMMAND} . -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/src/gtest
-            SOURCE_DIR ${CMAKE_BINARY_DIR}/src/gtest-lib
-            BUILD_IN_SOURCE 1
-            BUILD_COMMAND make
-            URL_MD5 1e43300b309686f96e09d5719e22817c
-            )
-endif()
-
-INSTALL(DIRECTORY ${CMAKE_BINARY_DIR}/src/gtest/ DESTINATION thirdparty)
-
-add_dependencies(thirdparty ADD_${LIB_GTEST})
+#add_dependencies(thirdparty ADD_${LIB_GTEST})
 
 if (TARS_PROTOBUF)
     set(PROTOBUF_DIR_INC "${THIRDPARTY_PATH}/protobuf/include")

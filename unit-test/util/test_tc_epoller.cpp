@@ -4,7 +4,7 @@
 #include <thread>
 #include <iostream>
 #include <cmath>
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 using namespace tars;
 

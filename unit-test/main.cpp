@@ -3,7 +3,7 @@
 #include <vector>
 #include "util/tc_common.h"
 #include "util/tc_logger.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 using namespace std;
 using namespace tars;

@@ -5,7 +5,7 @@
 #include "util/tc_coroutine.h"
 #include "util/tc_coroutine_queue.h"
 #include "util/tc_thread.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 using namespace tars;
 

@@ -3,7 +3,7 @@
 //
 
 #include "util/tc_json.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 #include "../server/Hello.h"
 
 using namespace tars;

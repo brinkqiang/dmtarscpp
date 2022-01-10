@@ -4,7 +4,7 @@
 
 #include "util/tc_network_buffer.h"
 #include "util/tc_logger.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 using namespace tars;
 

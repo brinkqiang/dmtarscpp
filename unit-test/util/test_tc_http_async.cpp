@@ -7,7 +7,7 @@
 #include "util/tc_http_async.h"
 #include "util/tc_md5.h"
 #include "test_server.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 #include "certs.h"
 
 using namespace tars;

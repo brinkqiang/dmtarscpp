@@ -2,7 +2,7 @@
 #include "util/tc_logger.h"
 #include "util/tc_common.h"
 #include "util/tc_thread_pool.h"
-#include "gtest/gtest.h"
+#include "gtest.h"
 
 #include <iostream>
 #include <vector>

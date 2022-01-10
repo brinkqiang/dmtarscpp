@@ -66,7 +66,7 @@ add_subdirectory(servant)
 
 IF (NOT ${ONLY_LIB})
 add_subdirectory(examples)
-#add_subdirectory(unit-test)
+add_subdirectory(unit-test)
 ENDIF()
 
 
