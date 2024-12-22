@@ -5,7 +5,8 @@
 #
 
 # - install depends tools
-# sudo apt-get install zlib1g-dev flex bison psmisc ncurses-devel
+# sudo apt-get install zlib1g-dev flex bison psmisc libncurses-dev
+# ncurses-devel -> libncurses-dev
 #
 
 
