@@ -19,8 +19,8 @@ mkdir -p build
 pushd build
 
 cmake -DCMAKE_BUILD_TYPE=relwithdebinfo ..
-cmake --build . --config relwithdebinfo -- -j$(nproc)
-
+cmake --build . --config relwithdebinfo
+# 这个项目不能用 -- -j$(nproc) 原因不明
 popd
 
 # popd
